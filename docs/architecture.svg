@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="640" viewBox="0 0 1200 640" role="img" aria-labelledby="title description">
+<title id="title">Архитектура DB Regression Hunter</title>
+<desc id="description">PostgreSQL передаёт статистику Go-сервису. Сервис обнаруживает деградацию и отправляет расследование в Telegram. Prometheus хранит метрики для Grafana. Планируемый LLM API объясняет доказательства.</desc>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/></marker>
+  <marker id="purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#9333ea"/></marker>
+</defs>
+<rect width="1200" height="640" rx="20" fill="#f8fafc"/>
+<g font-family="Arial, Helvetica, sans-serif">
+<text x="40" y="48" fill="#0f172a" font-size="26" font-weight="700">DB Regression Hunter</text>
+<text x="40" y="77" fill="#475569" font-size="16">От статистики PostgreSQL к проверяемой гипотезе и следующему действию</text>
+<rect x="250" y="120" width="690" height="220" rx="18" fill="#eef2ff" stroke="#c7d2fe" stroke-width="2"/>
+<text x="276" y="155" fill="#4338ca" font-size="16" font-weight="700">GO-СЕРВИС</text>
+
+<path d="M 210 235 H 280" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<text x="245" y="181" fill="#64748b" font-size="13" text-anchor="middle">read-only SQL</text>
+<path d="M 450 235 H 510" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<path d="M 680 235 H 740" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<path d="M 910 235 H 990" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<text x="950" y="220" fill="#64748b" font-size="13" text-anchor="middle">отчёт</text>
+<path d="M 365 280 V 430" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<text x="405" y="388" fill="#64748b" font-size="13" text-anchor="middle">/metrics</text>
+<path d="M 450 475 H 510" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<path d="M 680 475 H 705 V 570 H 1075 V 520" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<text x="885" y="592" fill="#64748b" font-size="13" text-anchor="middle">графики</text>
+<path d="M 1075 280 V 430" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<text x="1075" y="388" fill="#64748b" font-size="13" text-anchor="middle">алерты и команды</text>
+<path d="M 595 280 V 380 H 780 V 430" fill="none" stroke="#9333ea" stroke-width="2" stroke-linejoin="round" stroke-dasharray="6 5" marker-end="url(#purple)"/>
+<text x="685" y="367" fill="#9333ea" font-size="13" text-anchor="middle">пакет доказательств</text>
+<path d="M 860 430 V 280" fill="none" stroke="#9333ea" stroke-width="2" stroke-linejoin="round" stroke-dasharray="6 5" marker-end="url(#purple)"/>
+<text x="900" y="408" fill="#9333ea" font-size="13" text-anchor="middle">объяснение</text>
+<rect x="40" y="190" width="170" height="90" rx="12" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.5"/>
+<text x="125" y="220" text-anchor="middle" fill="#0c4a6e" font-size="17" font-weight="700">PostgreSQL</text>
+<text x="125" y="243" text-anchor="middle" fill="#0c4a6e" font-size="13">Наблюдаемая БД</text>
+<rect x="280" y="190" width="170" height="90" rx="12" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
+<text x="365" y="220" text-anchor="middle" fill="#312e81" font-size="17" font-weight="700">Сбор метрик</text>
+<text x="365" y="243" text-anchor="middle" fill="#312e81" font-size="13">Снимки каждые 10 с</text>
+<rect x="510" y="190" width="170" height="90" rx="12" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
+<text x="595" y="220" text-anchor="middle" fill="#312e81" font-size="17" font-weight="700">Детектор</text>
+<text x="595" y="243" text-anchor="middle" fill="#312e81" font-size="13">Baseline и отклонения</text>
+<text x="595" y="261" text-anchor="middle" fill="#312e81" font-size="13">Правила и факты</text>
+<rect x="740" y="190" width="170" height="90" rx="12" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
+<text x="825" y="220" text-anchor="middle" fill="#312e81" font-size="17" font-weight="700">Расследование</text>
+<text x="825" y="243" text-anchor="middle" fill="#312e81" font-size="13">Гипотезы и данные</text>
+<text x="825" y="261" text-anchor="middle" fill="#312e81" font-size="13">Следующие шаги</text>
+<rect x="990" y="190" width="170" height="90" rx="12" fill="#fff7ed" stroke="#f59e0b" stroke-width="1.5"/>
+<text x="1075" y="220" text-anchor="middle" fill="#78350f" font-size="17" font-weight="700">Telegram</text>
+<text x="1075" y="243" text-anchor="middle" fill="#78350f" font-size="13">Уведомления</text>
+<text x="1075" y="261" text-anchor="middle" fill="#78350f" font-size="13">Статус и история</text>
+<rect x="280" y="430" width="170" height="90" rx="12" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
+<text x="365" y="460" text-anchor="middle" fill="#064e3b" font-size="17" font-weight="700">Prometheus</text>
+<text x="365" y="483" text-anchor="middle" fill="#064e3b" font-size="13">История метрик</text>
+<rect x="510" y="430" width="170" height="90" rx="12" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
+<text x="595" y="460" text-anchor="middle" fill="#064e3b" font-size="17" font-weight="700">Grafana</text>
+<text x="595" y="483" text-anchor="middle" fill="#064e3b" font-size="13">Графики и дашборды</text>
+<rect x="740" y="430" width="170" height="90" rx="12" fill="#faf5ff" stroke="#a855f7" stroke-width="1.5" stroke-dasharray="6 5"/>
+<text x="825" y="460" text-anchor="middle" fill="#581c87" font-size="17" font-weight="700">LLM API</text>
+<text x="825" y="483" text-anchor="middle" fill="#581c87" font-size="13">Интерпретация фактов</text>
+<text x="825" y="501" text-anchor="middle" fill="#581c87" font-size="13">Планируется</text>
+<rect x="990" y="430" width="170" height="90" rx="12" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
+<text x="1075" y="460" text-anchor="middle" fill="#0f172a" font-size="17" font-weight="700">Разработчик</text>
+<text x="1075" y="483" text-anchor="middle" fill="#0f172a" font-size="13">Проверяет гипотезу</text>
+<text x="1075" y="501" text-anchor="middle" fill="#0f172a" font-size="13">Принимает решение</text>
+<text x="40" y="618" fill="#64748b" font-size="13">Сплошные связи — текущий контур. Пунктир — планируемая интеграция LLM.</text>
+</g></svg>
