@@ -62,7 +62,7 @@ func (b *Bot) Send(ctx context.Context, message string) error {
 }
 
 func (b *Bot) Notify(ctx context.Context, i detector.Incident) error {
-	message := fmt.Sprintf("Расследование %s\nНачало симптомов: %s\n%s\n\nДанные:\n%s\n\nСледующие шаги:\n%s", i.ID, i.StartedAt.Format(time.RFC3339), i.Hypothesis, strings.Join(i.Evidence, "\n"), strings.Join(i.NextSteps, "\n"))
+	message := FormatIncident(i)
 	if b.grafanaURL != "" {
 		message += "\n\nGrafana: " + b.grafanaURL
 	}
@@ -134,4 +134,42 @@ func (b *Bot) RunWithIncidentLookup(ctx context.Context, status func() string, l
 			}
 		}
 	}
+}
+
+// FormatIncident is presentation only; the incident JSON contains machine-readable data.
+func FormatIncident(i detector.Incident) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Инцидент %s · %s\nНачало: %s\nСигнал: %s\n", i.ID, i.Status, i.StartedAt.Format(time.RFC3339), i.Finding)
+	fmt.Fprintf(&b, "Возраст запроса при обнаружении: %.2f s; baseline: %.2f s; порог: %.2f s\n", i.Trigger.Observed, i.Trigger.Baseline, i.Trigger.Threshold)
+	for n, root := range i.Blockers {
+		if n == 3 {
+			fmt.Fprintf(&b, "Ещё блокировщиков: %d\n", len(i.Blockers)-n)
+			break
+		}
+		fmt.Fprintf(&b, "\nКорневой PID %d\n", root.PID)
+		if i.BlockingGraph != nil {
+			for _, session := range i.BlockingGraph.Nodes {
+				if session.PID == root.PID {
+					fmt.Fprintf(&b, "%s · %s · транзакция %.1f s\n", session.Application, session.State, session.TransactionAgeSeconds)
+					break
+				}
+			}
+		}
+		if len(root.Chains) > 0 {
+			chain := []string{}
+			for _, pid := range root.Chains[0] {
+				chain = append(chain, fmt.Sprint(pid))
+			}
+			fmt.Fprintf(&b, "Ожидание: %s\n", strings.Join(chain, " → "))
+		}
+	}
+	fmt.Fprintf(&b, "\nПик возраста запросов: %.2f s; ожидающих Lock: %d\nВосстановление: %d/%d; пропусков: %d", i.PeakQuerySeconds, i.PeakLockWaiters, i.Recovery.NormalSamples, i.Recovery.RequiredSamples, i.DataGaps)
+	if i.ResolvedAt != nil {
+		fmt.Fprintf(&b, "\nВосстановление подтверждено: %s", i.ResolvedAt.Format(time.RFC3339))
+	}
+	text := []rune(b.String())
+	if len(text) > 3000 {
+		return string(text[:2990]) + "…"
+	}
+	return string(text)
 }

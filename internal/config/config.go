@@ -12,6 +12,7 @@ type Config struct {
 	PollInterval                                                     time.Duration
 	BaselineSamples, ConfirmSamples                                  int
 	DegradationFactor                                                float64
+	RecoverySamples                                                  int
 }
 
 func Load() (Config, error) {
@@ -28,6 +29,9 @@ func Load() (Config, error) {
 	}
 	if c.ConfirmSamples, err = strconv.Atoi(value("CONFIRM_SAMPLES", "3")); err != nil || c.ConfirmSamples < 1 {
 		return c, fmt.Errorf("CONFIRM_SAMPLES must be positive")
+	}
+	if c.RecoverySamples, err = strconv.Atoi(value("RECOVERY_SAMPLES", "3")); err != nil || c.RecoverySamples < 1 || c.RecoverySamples > 10000 {
+		return c, fmt.Errorf("RECOVERY_SAMPLES must be between 1 and 10000")
 	}
 	if c.DegradationFactor, err = strconv.ParseFloat(value("DEGRADATION_FACTOR", "3"), 64); err != nil || !(c.DegradationFactor > 1 && c.DegradationFactor < 1000) {
 		return c, fmt.Errorf("DEGRADATION_FACTOR must be between 1 and 1000, exclusive")

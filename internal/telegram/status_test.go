@@ -47,9 +47,9 @@ func TestStatusSummaryUnavailableCollection(t *testing.T) {
 			maxAge := time.Nanosecond
 			if failure {
 				maxAge = 100 * 365 * 24 * time.Hour
-				store.Failed()
+				store.Failed(nil)
 			}
-			got := StatusSummary(store.View(maxAge), 10*time.Second, at.Add(time.Minute))
+			got := StatusSummary(store.View(maxAge, true), 10*time.Second, at.Add(time.Minute))
 			for _, part := range []string{"Сбор недоступен или данные устарели", "Последние известные данные", "Давность снимка: 1m0s", "Активных сессий: 7", "Ожидают блокировку Lock: 2", "12.35 с", "Сохранено расследований: 0", "Расследований пока нет"} {
 				if !strings.Contains(got, part) {
 					t.Fatalf("missing %q in %s", part, got)

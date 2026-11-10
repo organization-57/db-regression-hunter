@@ -40,15 +40,15 @@
 <text x="125" y="501" text-anchor="middle" fill="#78350f" font-size="13">Инциденты по циклу</text>
 <rect x="280" y="190" width="170" height="90" rx="12" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
 <text x="365" y="220" text-anchor="middle" fill="#312e81" font-size="17" font-weight="700">Сбор метрик</text>
-<text x="365" y="243" text-anchor="middle" fill="#312e81" font-size="13">Снимки каждые 10 с</text>
+<text x="365" y="243" text-anchor="middle" fill="#312e81" font-size="13">Снимки и граф ожиданий</text>
 <rect x="510" y="190" width="170" height="90" rx="12" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
 <text x="595" y="220" text-anchor="middle" fill="#312e81" font-size="17" font-weight="700">Детектор</text>
 <text x="595" y="243" text-anchor="middle" fill="#312e81" font-size="13">Baseline и отклонения</text>
 <text x="595" y="261" text-anchor="middle" fill="#312e81" font-size="13">Правила и факты</text>
 <rect x="740" y="190" width="170" height="90" rx="12" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
 <text x="825" y="220" text-anchor="middle" fill="#312e81" font-size="17" font-weight="700">Расследование</text>
-<text x="825" y="243" text-anchor="middle" fill="#312e81" font-size="13">Гипотезы и данные</text>
-<text x="825" y="261" text-anchor="middle" fill="#312e81" font-size="13">Следующие шаги</text>
+<text x="825" y="243" text-anchor="middle" fill="#312e81" font-size="13">Корневые PID и факты</text>
+<text x="825" y="261" text-anchor="middle" fill="#312e81" font-size="13">Восстановление</text>
 <rect x="990" y="190" width="170" height="90" rx="12" fill="#fff7ed" stroke="#f59e0b" stroke-width="1.5"/>
 <text x="1075" y="220" text-anchor="middle" fill="#78350f" font-size="17" font-weight="700">Telegram</text>
 <text x="1075" y="243" text-anchor="middle" fill="#78350f" font-size="13">Уведомления</text>

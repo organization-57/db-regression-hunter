@@ -17,7 +17,7 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestIncidentCommand(t *testing.T) {
-	i := detector.Incident{ID: "1794321188121986000", StartedAt: time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC), DetectedAt: time.Date(2026, 11, 10, 12, 0, 20, 0, time.UTC), Hypothesis: "Блокировки"}
+	i := detector.Incident{ID: "1794321188121986000", Status: detector.Open, StartedAt: time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC), DetectedAt: time.Date(2026, 11, 10, 12, 0, 20, 0, time.UTC), Finding: "lock_contention"}
 	for _, tc := range []struct {
 		name, command, want string
 		lookupCalls         int

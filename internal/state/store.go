@@ -24,17 +24,33 @@ type Store struct {
 func (s *Store) Update(snapshot collector.Snapshot, incident *detector.Incident) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.latest = &snapshot
+	latest := collector.CloneSnapshot(snapshot)
+	s.latest = &latest
 	s.healthy = true
-	if incident != nil {
-		s.incidents = append(s.incidents, *incident)
-		if len(s.incidents) > 100 {
-			s.incidents = s.incidents[1:]
-		}
-	}
+	s.upsert(incident)
 }
 
-func (s *Store) Failed() { s.mu.Lock(); defer s.mu.Unlock(); s.healthy = false }
+func (s *Store) Failed(incident *detector.Incident) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.healthy = false
+	s.upsert(incident)
+}
+
+func (s *Store) upsert(update *detector.Incident) {
+	if update == nil {
+		return
+	}
+	i := detector.CloneIncident(*update)
+	if n := len(s.incidents) - 1; n >= 0 && s.incidents[n].ID == i.ID {
+		s.incidents[n] = i
+		return
+	}
+	s.incidents = append(s.incidents, i)
+	if len(s.incidents) > 100 {
+		s.incidents = append([]detector.Incident{}, s.incidents[1:]...)
+	}
+}
 
 // IncidentByID searches retained incidents independently of collection health.
 func (s *Store) IncidentByID(id string) (detector.Incident, bool) {
@@ -42,20 +58,29 @@ func (s *Store) IncidentByID(id string) (detector.Incident, bool) {
 	defer s.mu.RUnlock()
 	for _, incident := range s.incidents {
 		if incident.ID == id {
-			incident.Evidence = append([]string(nil), incident.Evidence...)
-			incident.NextSteps = append([]string(nil), incident.NextSteps...)
-			return incident, true
+			return detector.CloneIncident(incident), true
 		}
 	}
 	return detector.Incident{}, false
 }
 
-func (s *Store) View(maxAge time.Duration) View {
+func (s *Store) View(maxAge time.Duration, details bool) View {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	v := View{Healthy: s.healthy && s.latest != nil && time.Since(s.latest.At) <= maxAge, Incidents: append([]detector.Incident{}, s.incidents...)}
+	v := View{Healthy: s.healthy && s.latest != nil && time.Since(s.latest.At) <= maxAge, Incidents: []detector.Incident{}}
+	for _, i := range s.incidents {
+		if details {
+			v.Incidents = append(v.Incidents, detector.CloneIncident(i))
+		} else {
+			v.Incidents = append(v.Incidents, detector.Incident{Status: i.Status})
+		}
+	}
 	if s.latest != nil {
 		snapshot := *s.latest
+		snapshot.BlockingGraph = nil
+		if details {
+			snapshot = collector.CloneSnapshot(*s.latest)
+		}
 		v.Latest = &snapshot
 	}
 	return v

@@ -9,15 +9,16 @@ import (
 )
 
 type Snapshot struct {
-	At                 time.Time `json:"at"`
-	Active             int       `json:"active_sessions"`
-	LockWaiters        int       `json:"lock_waiters"`
-	OldestQuerySeconds float64   `json:"oldest_query_seconds"`
-	Commits            int64     `json:"commits"`
-	Rollbacks          int64     `json:"rollbacks"`
-	BlocksRead         int64     `json:"blocks_read"`
-	BlocksHit          int64     `json:"blocks_hit"`
-	TempBytes          int64     `json:"temp_bytes"`
+	At                 time.Time      `json:"at"`
+	Active             int            `json:"active_sessions"`
+	LockWaiters        int            `json:"lock_waiters"`
+	OldestQuerySeconds float64        `json:"oldest_query_seconds"`
+	Commits            int64          `json:"commits"`
+	Rollbacks          int64          `json:"rollbacks"`
+	BlocksRead         int64          `json:"blocks_read"`
+	BlocksHit          int64          `json:"blocks_hit"`
+	TempBytes          int64          `json:"temp_bytes"`
+	BlockingGraph      *BlockingGraph `json:"blocking_graph,omitempty"`
 }
 
 type Postgres struct{ db *sql.DB }
@@ -39,13 +40,25 @@ func (p *Postgres) Collect(ctx context.Context) (Snapshot, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	s := Snapshot{}
+	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return s, err
+	}
+	defer tx.Rollback()
 	// Exclude our own backend. No SQL texts or application data are collected.
-	err := p.db.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 SELECT clock_timestamp(),
        (SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND state='active'),
        (SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock'),
        COALESCE((SELECT max(GREATEST(0, extract(epoch FROM clock_timestamp()-query_start))) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND state='active'), 0)::float8,
        xact_commit, xact_rollback, blks_read, blks_hit, temp_bytes
 FROM pg_stat_database WHERE datname=current_database()`).Scan(&s.At, &s.Active, &s.LockWaiters, &s.OldestQuerySeconds, &s.Commits, &s.Rollbacks, &s.BlocksRead, &s.BlocksHit, &s.TempBytes)
-	return s, err
+	if err != nil {
+		return s, err
+	}
+	s.BlockingGraph, err = collectGraph(ctx, tx, s.At)
+	if err != nil {
+		return s, err
+	}
+	return s, tx.Commit()
 }

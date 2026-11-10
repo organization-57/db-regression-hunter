@@ -39,7 +39,7 @@ func run() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	store := &state.Store{}
-	d := detector.New(cfg.BaselineSamples, cfg.ConfirmSamples, cfg.DegradationFactor)
+	d := detector.New(detector.Options{BaselineSamples: cfg.BaselineSamples, ConfirmSamples: cfg.ConfirmSamples, RecoverySamples: cfg.RecoverySamples, Factor: cfg.DegradationFactor, MaxGap: 3 * cfg.PollInterval})
 	maxAge := 3 * cfg.PollInterval
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: httpapi.Handler(store, maxAge), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
 	var wg sync.WaitGroup
@@ -51,10 +51,10 @@ func run() error {
 		go func() {
 			defer wg.Done()
 			bot.RunWithIncidentLookup(ctx, func() string {
-				v := store.View(maxAge)
+				v := store.View(maxAge, true)
 				return telegram.StatusSummary(v, cfg.PollInterval, time.Now())
 			}, func() string {
-				v := store.View(maxAge)
+				v := store.View(maxAge, true)
 				if len(v.Incidents) == 0 {
 					return "Расследований пока нет (возможен прогрев baseline)"
 				}
@@ -84,16 +84,15 @@ func run() error {
 		for {
 			s, err := pg.Collect(ctx)
 			if err != nil {
-				store.Failed()
-				d.Reset()
+				store.Failed(d.Missing(time.Now().UTC()))
 				if ctx.Err() == nil {
-					slog.Warn("PostgreSQL collection failed; baseline reset")
+					slog.Warn("PostgreSQL collection failed; recovery confirmation interrupted")
 				}
 			} else {
 				i := d.Observe(s)
 				store.Update(s, i)
-				if i != nil {
-					slog.Info("incident detected", "id", i.ID, "hypothesis", i.Hypothesis)
+				if i != nil && i.Notify {
+					slog.Info("incident transition", "id", i.ID, "status", i.Status, "blockers", len(i.Blockers), "finding", i.Finding)
 					if bot != nil {
 						select {
 						case notifications <- *i:

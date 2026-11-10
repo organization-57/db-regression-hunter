@@ -4,12 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/makeev/db-regression-hunter/internal/collector"
 	"github.com/makeev/db-regression-hunter/internal/detector"
+	"github.com/makeev/db-regression-hunter/internal/state"
 )
 
 // Run against a dedicated PostgreSQL demo database without the workload service.
@@ -57,14 +57,16 @@ WHERE o.id=(SELECT max(id) FROM demo_shop.orders) GROUP BY o.total_cents,p.amoun
 		t.Fatal(err)
 	}
 	defer pg.Close()
+	store := &state.Store{}
 	warm := func() *detector.Detector {
-		d := detector.New(20, 2, 3)
+		d := detector.New(detector.Options{BaselineSamples: 20, ConfirmSamples: 2, RecoverySamples: 2, Factor: 3})
 		for range 20 {
 			s, err := pg.Collect(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
 			d.Observe(s)
+			store.Update(s, nil)
 		}
 		return d
 	}
@@ -75,7 +77,9 @@ WHERE o.id=(SELECT max(id) FROM demo_shop.orders) GROUP BY o.total_cents,p.amoun
 			if err != nil {
 				t.Fatal(err)
 			}
-			if i := d.Observe(s); i != nil {
+			i := d.Observe(s)
+			store.Update(s, i)
+			if i != nil && i.Notify {
 				return i
 			}
 			if !pause(ctx, 100*time.Millisecond) {
@@ -99,9 +103,17 @@ WHERE o.id=(SELECT max(id) FROM demo_shop.orders) GROUP BY o.total_cents,p.amoun
 	checkoutDone := make(chan error, 1)
 	go func() { checkoutDone <- Checkout(ctx, db, 1, 1) }()
 	i := awaitIncident(d)
-	if !strings.Contains(i.Hypothesis, "Блокировки") {
+	if i.PeakLockWaiters == 0 {
 		t.Fatalf("expected lock evidence: %+v", i)
 	}
+	var rootPID int
+	if err = db.QueryRowContext(ctx, "SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND state='idle in transaction'").Scan(&rootPID); err != nil {
+		t.Fatal(err)
+	}
+	if len(i.Blockers) != 1 || i.Blockers[0].PID != rootPID || i.BlockingGraph == nil || !i.BlockingGraph.Complete {
+		t.Fatalf("actual blocking PID missing: want %d, report %+v", rootPID, i)
+	}
+	incidentID := i.ID
 	if err = <-lockDone; err != nil {
 		t.Fatal(err)
 	}
@@ -112,11 +124,26 @@ WHERE o.id=(SELECT max(id) FROM demo_shop.orders) GROUP BY o.total_cents,p.amoun
 	if err != nil || s.LockWaiters != 0 {
 		t.Fatal("lock waiters remain", s, err)
 	}
+	for range 2 {
+		s, err = pg.Collect(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		i = d.Observe(s)
+		store.Update(s, i)
+	}
+	if i == nil || i.ID != incidentID || i.Status != detector.Resolved || i.ResolvedAt == nil {
+		t.Fatalf("recovery not confirmed: %+v", i)
+	}
+	detail := store.View(time.Minute, true).Incidents[0]
+	if detail.ID != incidentID || detail.Status != detector.Resolved || detail.BlockingGraph == nil || detail.Blockers[0].PID != rootPID {
+		t.Fatal("resolved report lost blocking evidence")
+	}
 	d = warm()
 	reportDone := make(chan error, 1)
 	go func() { reportDone <- ReportIncident(ctx, db, 2500*time.Millisecond) }()
 	i = awaitIncident(d)
-	if strings.Contains(i.Hypothesis, "Блокировки") {
+	if len(i.Blockers) > 0 {
 		t.Fatal("slow report incorrectly attributed to locks")
 	}
 	if err = <-reportDone; err != nil {

@@ -15,11 +15,11 @@ func TestIncidentSummaryWindow(t *testing.T) {
 	b := New("", "", "https://grafana.test/d/hunter?orgId=2")
 	// The formatter must work for arbitrary incidents, including a future ID lookup.
 	for _, i := range []detector.Incident{
-		{ID: "first", StartedAt: started, DetectedAt: started.Add(20 * time.Second), Hypothesis: "Блокировки"},
-		{ID: "second", StartedAt: started.Add(-time.Hour), DetectedAt: started.Add(-30 * time.Minute), Hypothesis: "Долгий запрос"},
+		{ID: "first", Status: detector.Open, StartedAt: started, DetectedAt: started.Add(20 * time.Second), Finding: "lock_contention"},
+		{ID: "second", Status: detector.Resolved, StartedAt: started.Add(-time.Hour), DetectedAt: started.Add(-30 * time.Minute), Finding: "query_age_regression"},
 	} {
 		message := b.IncidentSummary(i)
-		prefix := i.ID + "\n" + i.StartedAt.Format(time.RFC3339) + "\n" + i.Hypothesis + "\n\nGrafana: "
+		prefix := FormatIncident(i) + "\n\nGrafana: "
 		if !strings.HasPrefix(message, prefix) {
 			t.Fatal("missing incident summary", message)
 		}
@@ -38,10 +38,10 @@ func TestIncidentSummaryWindow(t *testing.T) {
 }
 
 func TestIncidentSummaryWithoutGrafana(t *testing.T) {
-	i := detector.Incident{ID: "123", StartedAt: time.Now(), Hypothesis: "hypothesis"}
+	i := detector.Incident{ID: "123", Status: detector.Open, StartedAt: time.Now(), Finding: "query_age_regression"}
 	for _, base := range []string{"", "https://%"} {
 		message := New("", "", base).IncidentSummary(i)
-		if strings.Contains(message, "Grafana:") || !strings.Contains(message, i.ID) || !strings.Contains(message, i.Hypothesis) {
+		if strings.Contains(message, "Grafana:") || message != FormatIncident(i) {
 			t.Fatal("incorrect summary without a link", message)
 		}
 	}
