@@ -1,0 +1,48 @@
+package state
+
+import (
+	"strconv"
+	"testing"
+	"time"
+
+	"github.com/makeev/db-regression-hunter/internal/collector"
+	"github.com/makeev/db-regression-hunter/internal/detector"
+)
+
+func TestIncidentUpdatesAndCopies(t *testing.T) {
+	s := &Store{}
+	at := time.Now().UTC()
+	graph := &collector.BlockingGraph{At: at, Complete: true, Nodes: []collector.Session{{PID: 33}}}
+	i := &detector.Incident{ID: "episode", Status: detector.Open, BlockingGraph: graph, Blockers: []detector.Blocker{{PID: 33, Chains: [][]int{{11, 33}}}}}
+	s.Update(collector.Snapshot{At: at, BlockingGraph: graph}, i)
+	i.Status = detector.Resolved
+	s.Update(collector.Snapshot{At: at}, i)
+	v := s.View(time.Minute, true)
+	if len(v.Incidents) != 1 || v.Incidents[0].Status != detector.Resolved {
+		t.Fatal("incident duplicated or not updated")
+	}
+	v.Incidents[0].BlockingGraph.Nodes[0].PID = 999
+	v.Incidents[0].Blockers[0].Chains[0][0] = 999
+	copy := s.View(time.Minute, true).Incidents[0]
+	if copy.BlockingGraph.Nodes[0].PID != 33 || copy.Blockers[0].Chains[0][0] != 11 {
+		t.Fatal("API result aliases retained evidence")
+	}
+	for n := 0; n < 101; n++ {
+		s.Update(collector.Snapshot{At: at}, &detector.Incident{ID: strconv.Itoa(n), Status: detector.Resolved})
+	}
+	if len(s.incidents) != 100 || s.incidents[0].ID != "1" {
+		t.Fatal("incident retention is not bounded")
+	}
+}
+
+func TestMetricsViewOmitsReportAndGraphCopies(t *testing.T) {
+	s := &Store{}
+	s.Update(collector.Snapshot{At: time.Now(), BlockingGraph: &collector.BlockingGraph{Complete: true}}, &detector.Incident{ID: "episode", Status: detector.Open})
+	metrics := s.View(time.Minute, false)
+	if !metrics.Healthy || metrics.Latest.BlockingGraph != nil || metrics.Incidents[0].ID != "" || metrics.Incidents[0].Status != detector.Open {
+		t.Fatal("metrics view should retain only scalar metrics and incident statuses")
+	}
+	if s.View(time.Minute, true).Incidents[0].ID != "episode" {
+		t.Fatal("metrics read mutated the report")
+	}
+}

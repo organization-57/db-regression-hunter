@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,10 +9,11 @@ import (
 	"time"
 
 	"github.com/makeev/db-regression-hunter/internal/collector"
+	"github.com/makeev/db-regression-hunter/internal/detector"
 	"github.com/makeev/db-regression-hunter/internal/state"
 )
 
-func TestReadinessAndMetricsTrackCollection(t *testing.T) {
+func TestStatusAndMetricsTrackCollection(t *testing.T) {
 	s := &state.Store{}
 	h := Handler(s, time.Minute)
 	request := func(path string) *httptest.ResponseRecorder {
@@ -19,25 +21,39 @@ func TestReadinessAndMetricsTrackCollection(t *testing.T) {
 		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
 		return w
 	}
-	if request("/readyz").Code != 503 {
-		t.Fatal("empty store is not ready")
+	status := func() state.View {
+		t.Helper()
+		w := request("/api/status")
+		var v state.View
+		if w.Code != 200 {
+			t.Fatal(w.Code)
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &v); err != nil {
+			t.Fatal(err)
+		}
+		return v
 	}
-	s.Update(collector.Snapshot{At: time.Now(), LockWaiters: 2}, nil)
-	if request("/readyz").Code != 200 {
-		t.Fatal("fresh sample should be ready")
+	if status().Healthy {
+		t.Fatal("empty store cannot be healthy")
+	}
+	at := time.Now().UTC()
+	s.Update(collector.Snapshot{At: at, LockWaiters: 2, BlockingGraph: &collector.BlockingGraph{At: at, Complete: true}}, &detector.Incident{ID: "episode", Status: detector.Open})
+	v := status()
+	if !v.Healthy || v.Latest.BlockingGraph == nil || len(v.Incidents) != 1 {
+		t.Fatal("status must contain monitoring state, graph and latest report context")
+	}
+	if strings.Contains(request("/api/status").Body.String(), "\"history") {
+		t.Fatal("status must not expose raw history or its metadata")
 	}
 	if !strings.Contains(request("/metrics").Body.String(), "hunter_lock_waiters 2") {
-		t.Fatal("missing metrics")
+		t.Fatal("missing Prometheus metrics")
 	}
-	s.Failed()
-	if request("/readyz").Code != 503 {
-		t.Fatal("failed collection must affect readiness")
+	s.Failed(nil)
+	if status().Healthy || !strings.Contains(request("/metrics").Body.String(), "hunter_postgres_up 0") {
+		t.Fatal("collection failure must affect health")
 	}
-	s.Update(collector.Snapshot{At: time.Now().Add(-2 * time.Minute)}, nil)
-	if request("/readyz").Code != 503 {
-		t.Fatal("stale sample is not ready")
-	}
-	if request("/healthz").Code != 200 {
-		t.Fatal("liveness is independent of target")
+	s.Update(collector.Snapshot{At: at.Add(-2 * time.Minute)}, nil)
+	if status().Healthy {
+		t.Fatal("stale sample cannot be healthy")
 	}
 }
