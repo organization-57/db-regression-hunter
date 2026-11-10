@@ -52,10 +52,7 @@ func run() error {
 			defer wg.Done()
 			bot.RunWithIncidentLookup(ctx, func() string {
 				v := store.View(maxAge)
-				if !v.Healthy {
-					return "Сбор метрик недоступен или данные устарели"
-				}
-				return fmt.Sprintf("PostgreSQL доступен\nАктивных сессий: %d\nОжиданий Lock: %d\nВремя снимка: %s", v.Latest.Active, v.Latest.LockWaiters, v.Latest.At.Format(time.RFC3339))
+				return telegram.StatusSummary(v, cfg.PollInterval, time.Now())
 			}, func() string {
 				v := store.View(maxAge)
 				if len(v.Incidents) == 0 {
