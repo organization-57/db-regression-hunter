@@ -70,6 +70,11 @@ func (b *Bot) Notify(ctx context.Context, i detector.Incident) error {
 }
 
 func (b *Bot) Run(ctx context.Context, status func() string, latest func() string) {
+	b.RunWithIncidentLookup(ctx, status, latest, nil)
+}
+
+// RunWithIncidentLookup adds ID lookup while preserving the original Run API.
+func (b *Bot) RunWithIncidentLookup(ctx context.Context, status func() string, latest func() string, lookup func(string) (detector.Incident, bool)) {
 	var offset int64
 	for ctx.Err() == nil {
 		var updates []struct {
@@ -109,8 +114,18 @@ func (b *Bot) Run(ctx context.Context, status func() string, latest func() strin
 				answer = status()
 			case "/incidents":
 				answer = latest()
+			case "/incident":
+				if len(parts) != 2 {
+					answer = "Использование: /incident <ID>"
+				} else if lookup == nil {
+					answer = "Поиск расследований по ID недоступен"
+				} else if incident, ok := lookup(parts[1]); ok {
+					answer = b.IncidentSummary(incident)
+				} else {
+					answer = "Расследование не найдено. Хранятся только последние 100 расследований; после перезапуска они теряются."
+				}
 			case "/start", "/help":
-				answer = "/status — состояние PostgreSQL\n/incidents — последнее расследование"
+				answer = "/status — состояние PostgreSQL\n/incidents — последнее расследование\n/incident <ID> — расследование по ID"
 			default:
 				continue
 			}

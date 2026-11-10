@@ -52,6 +52,18 @@ func (s *Store) upsert(update *detector.Incident) {
 	}
 }
 
+// IncidentByID searches retained incidents independently of collection health.
+func (s *Store) IncidentByID(id string) (detector.Incident, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, incident := range s.incidents {
+		if incident.ID == id {
+			return detector.CloneIncident(incident), true
+		}
+	}
+	return detector.Incident{}, false
+}
+
 func (s *Store) View(maxAge time.Duration, details bool) View {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

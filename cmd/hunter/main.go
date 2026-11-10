@@ -50,20 +50,17 @@ func run() error {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			bot.Run(ctx, func() string {
-				v := store.View(maxAge, false)
-				if !v.Healthy {
-					return "Сбор метрик недоступен или данные устарели"
-				}
-				return fmt.Sprintf("PostgreSQL доступен\nАктивных сессий: %d\nОжиданий Lock: %d\nВремя снимка: %s", v.Latest.Active, v.Latest.LockWaiters, v.Latest.At.Format(time.RFC3339))
+			bot.RunWithIncidentLookup(ctx, func() string {
+				v := store.View(maxAge, true)
+				return telegram.StatusSummary(v, cfg.PollInterval, time.Now())
 			}, func() string {
 				v := store.View(maxAge, true)
 				if len(v.Incidents) == 0 {
 					return "Расследований пока нет (возможен прогрев baseline)"
 				}
 				i := v.Incidents[len(v.Incidents)-1]
-				return telegram.FormatIncident(i)
-			})
+				return bot.IncidentSummary(i)
+			}, store.IncidentByID)
 		}()
 		go func() {
 			defer wg.Done()

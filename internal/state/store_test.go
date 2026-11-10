@@ -9,6 +9,46 @@ import (
 	"github.com/makeev/db-regression-hunter/internal/detector"
 )
 
+func TestIncidentByID(t *testing.T) {
+	s := &Store{}
+	if _, ok := s.IncidentByID("missing"); ok {
+		t.Fatal("empty store returned an incident")
+	}
+	at := time.Now().UTC()
+	for n := range 101 {
+		s.Update(collector.Snapshot{At: at}, &detector.Incident{
+			ID: strconv.Itoa(n), Status: detector.Open, Finding: "lock_contention",
+			BlockingGraph: &collector.BlockingGraph{Nodes: []collector.Session{{PID: 33}}},
+			Blockers:      []detector.Blocker{{PID: 33, Chains: [][]int{{11, 33}}}},
+		})
+	}
+	s.Failed(nil)
+	for _, id := range []string{"1", "50", "100"} {
+		i, ok := s.IncidentByID(id)
+		if !ok || i.ID != id || i.Finding != "lock_contention" {
+			t.Fatal("incorrect incident", i, ok)
+		}
+		i.BlockingGraph.Nodes[0].PID = 999
+		i.Blockers[0].Chains[0][0] = 999
+		again, _ := s.IncidentByID(id)
+		if again.BlockingGraph.Nodes[0].PID != 33 || again.Blockers[0].Chains[0][0] != 11 {
+			t.Fatal("lookup exposes mutable store data")
+		}
+	}
+	for _, id := range []string{"0", "missing", ""} {
+		if _, ok := s.IncidentByID(id); ok {
+			t.Fatal("found missing or evicted incident", id)
+		}
+	}
+	update, _ := s.IncidentByID("100")
+	update.Status = detector.Resolved
+	s.Update(collector.Snapshot{At: at}, &update)
+	resolved, _ := s.IncidentByID("100")
+	if resolved.Status != detector.Resolved || len(s.View(time.Minute, true).Incidents) != 100 {
+		t.Fatal("lookup must return updated incident without duplication")
+	}
+}
+
 func TestIncidentUpdatesAndCopies(t *testing.T) {
 	s := &Store{}
 	at := time.Now().UTC()
