@@ -50,7 +50,7 @@ func run() error {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			bot.Run(ctx, func() string {
+			bot.RunWithIncidentLookup(ctx, func() string {
 				v := store.View(maxAge)
 				if !v.Healthy {
 					return "Сбор метрик недоступен или данные устарели"
@@ -63,7 +63,7 @@ func run() error {
 				}
 				i := v.Incidents[len(v.Incidents)-1]
 				return bot.IncidentSummary(i)
-			})
+			}, store.IncidentByID)
 		}()
 		go func() {
 			defer wg.Done()

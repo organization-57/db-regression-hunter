@@ -36,6 +36,20 @@ func (s *Store) Update(snapshot collector.Snapshot, incident *detector.Incident)
 
 func (s *Store) Failed() { s.mu.Lock(); defer s.mu.Unlock(); s.healthy = false }
 
+// IncidentByID searches retained incidents independently of collection health.
+func (s *Store) IncidentByID(id string) (detector.Incident, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, incident := range s.incidents {
+		if incident.ID == id {
+			incident.Evidence = append([]string(nil), incident.Evidence...)
+			incident.NextSteps = append([]string(nil), incident.NextSteps...)
+			return incident, true
+		}
+	}
+	return detector.Incident{}, false
+}
+
 func (s *Store) View(maxAge time.Duration) View {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
