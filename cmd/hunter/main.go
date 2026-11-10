@@ -62,7 +62,7 @@ func run() error {
 					return "Расследований пока нет (возможен прогрев baseline)"
 				}
 				i := v.Incidents[len(v.Incidents)-1]
-				return fmt.Sprintf("%s\n%s\n%s", i.ID, i.StartedAt.Format(time.RFC3339), i.Hypothesis)
+				return bot.IncidentSummary(i)
 			})
 		}()
 		go func() {
