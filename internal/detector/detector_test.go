@@ -12,7 +12,7 @@ func TestSustainedRegressionAndRecovery(t *testing.T) {
 	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	observe := func(age float64, locks int) *Incident {
 		at = at.Add(10 * time.Second)
-		return d.Observe(collector.Snapshot{At: at, OldestQuerySeconds: age, LockWaiters: locks, BlockingGraph: &collector.BlockingGraph{Complete: true}})
+		return observeQuery(d, collector.Snapshot{At: at, OldestQuerySeconds: age, LockWaiters: locks, BlockingGraph: &collector.BlockingGraph{Complete: true}})
 	}
 	for range 3 {
 		if observe(0.2, 0) != nil {
@@ -24,7 +24,7 @@ func TestSustainedRegressionAndRecovery(t *testing.T) {
 	}
 	started := at
 	i := observe(4, 2)
-	if i == nil || !i.StartedAt.Equal(started) || i.Finding != "lock_wait" || i.Trigger.Observed != 4 || i.Trigger.Threshold != 1 {
+	if i == nil || !i.StartedAt.Equal(started) || i.Finding != FindingLockWait || i.Trigger.Observed != 4 || i.Trigger.Threshold != 1 {
 		t.Fatalf("unexpected investigation: %+v", i)
 	}
 	if observe(5, 2).Notify {
@@ -36,26 +36,42 @@ func TestSustainedRegressionAndRecovery(t *testing.T) {
 	}
 	observe(3, 0)
 	i = observe(4, 0)
-	if i == nil || i.Finding != "query_age_regression" {
+	if i == nil || i.Finding != FindingQueryAgeRegression {
 		t.Fatalf("expected new episode without lock attribution: %+v", i)
 	}
 }
 
 func TestIdleBaselineAndMissingData(t *testing.T) {
 	d := New(Options{BaselineSamples: 3, ConfirmSamples: 1, RecoverySamples: 1, Factor: 3})
+	at := time.Now()
 	for range 3 {
-		d.Observe(collector.Snapshot{})
+		at = at.Add(time.Second)
+		observeQuery(d, collector.Snapshot{At: at})
 	}
-	if d.Observe(collector.Snapshot{OldestQuerySeconds: 0.5}) != nil {
+	if observeQuery(d, collector.Snapshot{At: at.Add(time.Second), OldestQuerySeconds: 0.5}) != nil {
 		t.Fatal("subsecond noise should not alert")
 	}
-	d.Missing(time.Now())
+	d.Missing(at.Add(2 * time.Second))
 	for range 3 {
-		if d.Observe(collector.Snapshot{OldestQuerySeconds: 2}) != nil {
+		at = at.Add(time.Second)
+		if observeQuery(d, collector.Snapshot{At: at, OldestQuerySeconds: 2}) != nil {
 			t.Fatal("reset must restart warmup")
 		}
 	}
-	if d.Observe(collector.Snapshot{OldestQuerySeconds: 2}) != nil {
+	at = at.Add(time.Second)
+	if observeQuery(d, collector.Snapshot{At: at, OldestQuerySeconds: 2}) != nil {
 		t.Fatal("stable workload should not alert")
 	}
+}
+
+func incidentFor(updates []*Incident, metric string) *Incident {
+	for _, i := range updates {
+		if i.Trigger.Metric == metric {
+			return i
+		}
+	}
+	return nil
+}
+func observeQuery(d *Detector, s collector.Snapshot) *Incident {
+	return incidentFor(d.Observe(s), "oldest_query_seconds")
 }

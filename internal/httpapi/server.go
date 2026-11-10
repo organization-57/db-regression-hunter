@@ -40,6 +40,7 @@ func Handler(store *state.Store, maxAge time.Duration) http.Handler {
 		s := v.Latest
 		fmt.Fprintf(w, "# TYPE hunter_snapshot_timestamp_seconds gauge\nhunter_snapshot_timestamp_seconds %d\n# TYPE hunter_active_sessions gauge\nhunter_active_sessions %d\n# TYPE hunter_lock_waiters gauge\nhunter_lock_waiters %d\n# TYPE hunter_oldest_query_seconds gauge\nhunter_oldest_query_seconds %g\n", s.At.Unix(), s.Active, s.LockWaiters, s.OldestQuerySeconds)
 		fmt.Fprintf(w, "# TYPE hunter_transactions_total counter\nhunter_transactions_total{status=\"commit\"} %d\nhunter_transactions_total{status=\"rollback\"} %d\n# TYPE hunter_blocks_total counter\nhunter_blocks_total{source=\"read\"} %d\nhunter_blocks_total{source=\"hit\"} %d\n# TYPE hunter_temp_bytes_total counter\nhunter_temp_bytes_total %d\n", s.Commits, s.Rollbacks, s.BlocksRead, s.BlocksHit, s.TempBytes)
+		fmt.Fprintf(w, "# TYPE hunter_deadlocks_total counter\nhunter_deadlocks_total %d\n", s.Deadlocks)
 	})
 	return mux
 }

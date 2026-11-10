@@ -14,11 +14,23 @@ const (
 	Resolved   = "resolved"
 )
 
+type Finding string
+
+const (
+	FindingQueryAgeRegression  Finding = "query_age_regression"
+	FindingLockWait            Finding = "lock_wait"
+	FindingLockContention      Finding = "lock_contention"
+	FindingActiveSessionsSurge Finding = "active_sessions_surge"
+	FindingTempFileGrowth      Finding = "temp_file_growth"
+	FindingDeadlock            Finding = "deadlock"
+)
+
 type Trigger struct {
-	Metric    string  `json:"metric"`
-	Observed  float64 `json:"observed"`
-	Baseline  float64 `json:"baseline"`
-	Threshold float64 `json:"threshold"`
+	Metric          string  `json:"metric"`
+	Observed        float64 `json:"observed"`
+	Baseline        float64 `json:"baseline"`
+	Threshold       float64 `json:"threshold"`
+	IntervalSeconds float64 `json:"interval_seconds,omitempty"`
 }
 
 type Blocker struct {
@@ -27,11 +39,8 @@ type Blocker struct {
 }
 
 type Recovery struct {
-	RequiredSamples    int  `json:"required_samples"`
-	NormalSamples      int  `json:"normal_samples"`
-	QueryAgeNormal     bool `json:"query_age_normal"`
-	LockWaitersCleared bool `json:"lock_waiters_cleared"`
-	GraphComplete      bool `json:"graph_complete"`
+	RequiredSamples int `json:"required_samples"`
+	NormalSamples   int `json:"normal_samples"`
 }
 
 type Incident struct {
@@ -42,11 +51,10 @@ type Incident struct {
 	UpdatedAt         time.Time                `json:"updated_at"`
 	RecoveryStartedAt *time.Time               `json:"recovery_started_at,omitempty"`
 	ResolvedAt        *time.Time               `json:"resolved_at,omitempty"`
-	Finding           string                   `json:"finding"`
+	Finding           Finding                  `json:"finding"`
 	Trigger           Trigger                  `json:"trigger"`
-	PeakQuerySeconds  float64                  `json:"peak_query_seconds"`
-	PeakLockWaiters   int                      `json:"peak_lock_waiters"`
-	Blockers          []Blocker                `json:"blockers"`
+	Peak              float64                  `json:"peak"`
+	Blockers          []Blocker                `json:"blockers,omitempty"`
 	BlockingGraph     *collector.BlockingGraph `json:"blocking_graph,omitempty"`
 	Recovery          Recovery                 `json:"recovery"`
 	DataGaps          int                      `json:"data_gaps"`
@@ -59,88 +67,164 @@ type Options struct {
 	MaxGap                                           time.Duration
 }
 
-// Detector belongs to the collection loop; returned reports are immutable copies.
-// Observe returns updates for the same ID. Notify is true only at opening and resolution.
+// Each metric has its own baseline and episode; only the collection loop owns them.
+type signal struct {
+	metric  string
+	finding Finding
+	floor   float64
+	event   bool
+	samples []float64
+	streak  int
+	started time.Time
+	current *Incident
+}
+
 type Detector struct {
-	options         Options
-	samples         []float64
-	streak          int
-	started, lastAt time.Time
-	current         *Incident
+	options  Options
+	signals  []signal
+	previous *collector.Snapshot // One counter observation, never a raw history buffer.
 }
 
-func New(options Options) *Detector { return &Detector{options: options} }
-
-// Missing does not close an incident or infer recovery from absence of observations.
-func (d *Detector) Missing(at time.Time) *Incident {
-	d.streak = 0
-	d.lastAt = time.Time{}
-	if d.current == nil {
-		d.samples = nil
-		return nil
-	}
-	i := d.current
-	i.DataGaps++
-	i.UpdatedAt = at
-	i.Status = Open
-	i.RecoveryStartedAt = nil
-	i.Recovery = Recovery{RequiredSamples: d.options.RecoverySamples}
-	return d.update(false)
+func New(options Options) *Detector {
+	return &Detector{options: options, signals: []signal{
+		{metric: "oldest_query_seconds", finding: FindingQueryAgeRegression, floor: 1},
+		{metric: "active_sessions", finding: FindingActiveSessionsSurge, floor: 4},
+		{metric: "temp_bytes_per_second", finding: FindingTempFileGrowth, floor: 64 * 1024},
+		{metric: "deadlocks_delta", finding: FindingDeadlock, event: true},
+	}}
 }
 
-func (d *Detector) Observe(s collector.Snapshot) *Incident {
-	if !d.lastAt.IsZero() && d.options.MaxGap > 0 && s.At.Sub(d.lastAt) > d.options.MaxGap {
-		d.Missing(s.At)
+// Missing preserves open episodes but restarts confirmation and counter intervals.
+func (d *Detector) Missing(at time.Time) []*Incident {
+	d.previous = nil
+	var updates []*Incident
+	for n := range d.signals {
+		r := &d.signals[n]
+		r.streak = 0
+		if r.current == nil {
+			r.samples = nil
+			continue
+		}
+		i := r.current
+		i.DataGaps++
+		i.UpdatedAt = at
+		i.Status = Open
+		i.RecoveryStartedAt = nil
+		i.Recovery.NormalSamples = 0
+		updates = append(updates, r.update(false))
 	}
-	d.lastAt = s.At
-	if d.current != nil {
-		return d.observeActive(s)
-	}
-	if len(d.samples) < d.options.BaselineSamples {
-		d.samples = append(d.samples, s.OldestQuerySeconds)
-		return nil
-	}
-	var sum float64
-	for _, v := range d.samples {
-		sum += v
-	}
-	baseline := sum / float64(len(d.samples))
-	threshold := math.Max(1, baseline*d.options.Factor)
-	if s.OldestQuerySeconds <= threshold {
-		d.streak = 0
-		copy(d.samples, d.samples[1:])
-		d.samples[len(d.samples)-1] = s.OldestQuerySeconds
-		return nil
-	}
-	if d.streak == 0 {
-		d.started = s.At
-	}
-	d.streak++
-	if d.streak < d.options.ConfirmSamples {
-		return nil
-	}
-	d.current = &Incident{
-		ID: fmt.Sprintf("%d", s.At.UnixNano()), Status: Open, StartedAt: d.started, DetectedAt: s.At, UpdatedAt: s.At,
-		Trigger:  Trigger{Metric: "oldest_query_seconds", Observed: s.OldestQuerySeconds, Baseline: baseline, Threshold: threshold},
-		Finding:  "query_age_regression",
-		Blockers: []Blocker{}, Recovery: Recovery{RequiredSamples: d.options.RecoverySamples},
-	}
-	d.enrich(s)
-	d.current.observeRecoveryConditions(s)
-	return d.update(true)
+	return updates
 }
 
-func (d *Detector) observeActive(s collector.Snapshot) *Incident {
-	i := d.current
+func (d *Detector) Observe(s collector.Snapshot) []*Incident {
+	previous := d.previous
+	interval := 0.0
+	if previous != nil {
+		interval = s.At.Sub(previous.At).Seconds()
+		// Never compare counters across missing observations, resets, restarts or clock reversal.
+		if interval <= 0 || (d.options.MaxGap > 0 && s.At.Sub(previous.At) > d.options.MaxGap) ||
+			!s.PostmasterStart.Equal(previous.PostmasterStart) || !sameTime(s.StatsReset, previous.StatsReset) ||
+			s.TempBytes < previous.TempBytes || s.Deadlocks < previous.Deadlocks {
+			d.Missing(s.At)
+			previous = nil
+			interval = 0
+		}
+	}
+	var updates []*Incident
+	for n := range d.signals {
+		r := &d.signals[n]
+		value, window := 0.0, 0.0
+		switch r.metric {
+		case "oldest_query_seconds":
+			value = s.OldestQuerySeconds
+		case "active_sessions":
+			value = float64(s.Active)
+		case "temp_bytes_per_second", "deadlocks_delta":
+			if previous == nil {
+				if r.current != nil {
+					updates = append(updates, r.update(false))
+				}
+				continue
+			}
+			window = interval
+			if r.metric == "temp_bytes_per_second" {
+				value = float64(s.TempBytes-previous.TempBytes) / interval
+			} else {
+				value = float64(s.Deadlocks - previous.Deadlocks)
+			}
+		default:
+			continue
+		}
+		if i := r.observe(s, value, window, d.options); i != nil {
+			updates = append(updates, i)
+		}
+	}
+	compact := s
+	compact.BlockingGraph = nil
+	d.previous = &compact
+	return updates
+}
+
+func sameTime(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Equal(*b)
+}
+
+func (r *signal) observe(s collector.Snapshot, value, interval float64, options Options) *Incident {
+	if r.current == nil {
+		baseline, threshold := 0.0, 0.0
+		if !r.event {
+			if len(r.samples) < options.BaselineSamples {
+				r.samples = append(r.samples, value)
+				return nil
+			}
+			for _, v := range r.samples {
+				baseline += v
+			}
+			baseline /= float64(len(r.samples))
+			threshold = math.Max(r.floor, baseline*options.Factor)
+		}
+		if value <= threshold {
+			r.streak = 0
+			if !r.event {
+				copy(r.samples, r.samples[1:])
+				r.samples[len(r.samples)-1] = value
+			}
+			return nil
+		}
+		if r.streak == 0 {
+			r.started = s.At
+			if interval > 0 {
+				r.started = s.At.Add(-time.Duration(interval * float64(time.Second)))
+			}
+		}
+		r.streak++
+		if !r.event && r.streak < options.ConfirmSamples {
+			return nil
+		}
+		r.current = &Incident{
+			ID: fmt.Sprintf("%d-%s", s.At.UnixNano(), r.metric), Status: Open, StartedAt: r.started, DetectedAt: s.At, UpdatedAt: s.At,
+			Finding: r.finding, Trigger: Trigger{Metric: r.metric, Observed: value, Baseline: baseline, Threshold: threshold, IntervalSeconds: interval},
+			Peak: value, Recovery: Recovery{RequiredSamples: options.RecoverySamples},
+		}
+		r.enrich(s)
+		return r.update(true)
+	}
+	i := r.current
 	i.UpdatedAt = s.At
-	d.enrich(s)
-	i.observeRecoveryConditions(s)
-	normal := i.Recovery.QueryAgeNormal && i.Recovery.LockWaitersCleared && i.Recovery.GraphComplete
+	i.Peak = math.Max(i.Peak, value)
+	r.enrich(s)
+	normal := value <= i.Trigger.Threshold
+	if r.metric == "oldest_query_seconds" {
+		normal = normal && s.LockWaiters == 0 && s.BlockingGraph != nil && s.BlockingGraph.Complete && len(s.BlockingGraph.Nodes) == 0
+	}
 	if !normal {
 		i.Status = Open
 		i.Recovery.NormalSamples = 0
 		i.RecoveryStartedAt = nil
-		return d.update(false)
+		return r.update(false)
 	}
 	if i.Recovery.NormalSamples == 0 {
 		at := s.At
@@ -148,49 +232,38 @@ func (d *Detector) observeActive(s collector.Snapshot) *Incident {
 	}
 	i.Recovery.NormalSamples++
 	i.Status = Recovering
-	if i.Recovery.NormalSamples < d.options.RecoverySamples {
-		return d.update(false)
+	if i.Recovery.NormalSamples < options.RecoverySamples {
+		return r.update(false)
 	}
 	i.Status = Resolved
 	at := s.At
 	i.ResolvedAt = &at
-	result := d.update(true)
-	d.current = nil
-	d.streak = 0
-	// Freeze the original normal baseline through the episode and recovery.
+	result := r.update(true)
+	r.current = nil
+	r.streak = 0
 	return result
 }
 
-func (i *Incident) observeRecoveryConditions(s collector.Snapshot) {
-	i.Recovery.QueryAgeNormal = s.OldestQuerySeconds <= i.Trigger.Threshold
-	i.Recovery.LockWaitersCleared = s.LockWaiters == 0 && s.BlockingGraph != nil && len(s.BlockingGraph.Nodes) == 0
-	i.Recovery.GraphComplete = s.BlockingGraph != nil && s.BlockingGraph.Complete
-}
-
-func (d *Detector) enrich(s collector.Snapshot) {
-	i := d.current
-	if s.OldestQuerySeconds > i.PeakQuerySeconds {
-		i.PeakQuerySeconds = s.OldestQuerySeconds
+func (r *signal) enrich(s collector.Snapshot) {
+	if r.metric != "oldest_query_seconds" {
+		return
 	}
-	if s.LockWaiters > i.PeakLockWaiters {
-		i.PeakLockWaiters = s.LockWaiters
-	}
+	i := r.current
 	if s.LockWaiters > 0 && len(i.Blockers) == 0 {
-		i.Finding = "lock_wait"
+		i.Finding = FindingLockWait
 	}
 	roots := findBlockers(s.BlockingGraph)
 	if len(roots) > 0 {
 		i.Blockers = roots
-		// Keep a bounded observed graph even after blocking sessions disappear.
 		i.BlockingGraph = collector.CloneGraph(s.BlockingGraph)
-		i.Finding = "lock_contention"
+		i.Finding = FindingLockContention
 	} else if i.BlockingGraph == nil && s.BlockingGraph != nil && len(s.BlockingGraph.Nodes) > 0 {
 		i.BlockingGraph = collector.CloneGraph(s.BlockingGraph)
 	}
 }
 
-func (d *Detector) update(notify bool) *Incident {
-	result := CloneIncident(*d.current)
+func (r *signal) update(notify bool) *Incident {
+	result := CloneIncident(*r.current)
 	result.Notify = notify
 	return &result
 }

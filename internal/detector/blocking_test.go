@@ -24,7 +24,7 @@ func TestBlockerChainRecoveryRelapseAndGaps(t *testing.T) {
 		if g != nil {
 			g.At = at
 		}
-		return d.Observe(collector.Snapshot{At: at, OldestQuerySeconds: age, LockWaiters: locks, BlockingGraph: g})
+		return observeQuery(d, collector.Snapshot{At: at, OldestQuerySeconds: age, LockWaiters: locks, BlockingGraph: g})
 	}
 	normal := func() *Incident { return observe(0, 0, &collector.BlockingGraph{Complete: true}) }
 	for range 3 {
@@ -85,20 +85,21 @@ func TestBlockerReferencesFollowEvidenceGraph(t *testing.T) {
 	d := New(Options{BaselineSamples: 3, ConfirmSamples: 1, RecoverySamples: 1, Factor: 3})
 	at := time.Now()
 	for range 3 {
-		d.Observe(collector.Snapshot{At: at})
+		at = at.Add(time.Second)
+		observeQuery(d, collector.Snapshot{At: at})
 	}
-	i := d.Observe(collector.Snapshot{At: at.Add(time.Second), OldestQuerySeconds: 3, LockWaiters: 2, BlockingGraph: graph(at)})
+	i := observeQuery(d, collector.Snapshot{At: at.Add(time.Second), OldestQuerySeconds: 3, LockWaiters: 2, BlockingGraph: graph(at)})
 	if i.Blockers[0].PID != 33 {
 		t.Fatal("initial root missing")
 	}
 	g := graph(at.Add(2 * time.Second))
 	g.Nodes[2].PID = 44
 	g.Nodes[1].BlockedBy = []int{44}
-	i = d.Observe(collector.Snapshot{At: g.At, OldestQuerySeconds: 4, LockWaiters: 2, BlockingGraph: g})
+	i = observeQuery(d, collector.Snapshot{At: g.At, OldestQuerySeconds: 4, LockWaiters: 2, BlockingGraph: g})
 	if len(i.Blockers) != 1 || i.Blockers[0].PID != 44 || i.Blockers[0].Chains[0][2] != 44 || i.BlockingGraph.Nodes[2].PID != 44 {
 		t.Fatal("blocker references and evidence graph must be replaced together")
 	}
-	i = d.Observe(collector.Snapshot{At: g.At.Add(time.Second), BlockingGraph: &collector.BlockingGraph{Complete: true}})
+	i = observeQuery(d, collector.Snapshot{At: g.At.Add(time.Second), BlockingGraph: &collector.BlockingGraph{Complete: true}})
 	if i.Status != Resolved || i.Blockers[0].PID != 44 || i.BlockingGraph.Nodes[2].PID != 44 {
 		t.Fatal("resolution lost the observed graph")
 	}
@@ -110,16 +111,16 @@ func TestLongSamplingGapDoesNotConfirmRecovery(t *testing.T) {
 	s := collector.Snapshot{At: at, BlockingGraph: &collector.BlockingGraph{Complete: true}}
 	for range 3 {
 		s.At = s.At.Add(time.Second)
-		d.Observe(s)
+		observeQuery(d, s)
 	}
 	s.At = s.At.Add(time.Second)
 	s.OldestQuerySeconds = 3
-	d.Observe(s)
+	observeQuery(d, s)
 	s.OldestQuerySeconds = 0
 	s.At = s.At.Add(time.Second)
-	d.Observe(s)
+	observeQuery(d, s)
 	s.At = s.At.Add(10 * time.Second)
-	i := d.Observe(s)
+	i := observeQuery(d, s)
 	if i.Status != Recovering || i.Recovery.NormalSamples != 1 || i.DataGaps != 1 {
 		t.Fatalf("sampling gap incorrectly confirmed recovery: %+v", i)
 	}

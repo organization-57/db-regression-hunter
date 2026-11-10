@@ -21,20 +21,24 @@ type Store struct {
 	incidents []detector.Incident
 }
 
-func (s *Store) Update(snapshot collector.Snapshot, incident *detector.Incident) {
+func (s *Store) Update(snapshot collector.Snapshot, incidents ...*detector.Incident) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	latest := collector.CloneSnapshot(snapshot)
 	s.latest = &latest
 	s.healthy = true
-	s.upsert(incident)
+	for _, incident := range incidents {
+		s.upsert(incident)
+	}
 }
 
-func (s *Store) Failed(incident *detector.Incident) {
+func (s *Store) Failed(incidents ...*detector.Incident) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.healthy = false
-	s.upsert(incident)
+	for _, incident := range incidents {
+		s.upsert(incident)
+	}
 }
 
 func (s *Store) upsert(update *detector.Incident) {
@@ -42,13 +46,22 @@ func (s *Store) upsert(update *detector.Incident) {
 		return
 	}
 	i := detector.CloneIncident(*update)
-	if n := len(s.incidents) - 1; n >= 0 && s.incidents[n].ID == i.ID {
-		s.incidents[n] = i
-		return
+	for n := range s.incidents {
+		if s.incidents[n].ID == i.ID {
+			s.incidents[n] = i
+			return
+		}
 	}
 	s.incidents = append(s.incidents, i)
 	if len(s.incidents) > 100 {
-		s.incidents = append([]detector.Incident{}, s.incidents[1:]...)
+		for n, old := range s.incidents {
+			if old.Status == detector.Resolved {
+				copy(s.incidents[n:], s.incidents[n+1:])
+				s.incidents[len(s.incidents)-1] = detector.Incident{}
+				s.incidents = s.incidents[:len(s.incidents)-1]
+				break
+			}
+		}
 	}
 }
 

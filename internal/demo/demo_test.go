@@ -77,10 +77,12 @@ WHERE o.id=(SELECT max(id) FROM demo_shop.orders) GROUP BY o.total_cents,p.amoun
 			if err != nil {
 				t.Fatal(err)
 			}
-			i := d.Observe(s)
-			store.Update(s, i)
-			if i != nil && i.Notify {
-				return i
+			updates := d.Observe(s)
+			store.Update(s, updates...)
+			for _, i := range updates {
+				if i.Notify && i.Trigger.Metric == "oldest_query_seconds" {
+					return i
+				}
 			}
 			if !pause(ctx, 100*time.Millisecond) {
 				break
@@ -103,7 +105,7 @@ WHERE o.id=(SELECT max(id) FROM demo_shop.orders) GROUP BY o.total_cents,p.amoun
 	checkoutDone := make(chan error, 1)
 	go func() { checkoutDone <- Checkout(ctx, db, 1, 1) }()
 	i := awaitIncident(d)
-	if i.PeakLockWaiters == 0 {
+	if len(i.Blockers) == 0 {
 		t.Fatalf("expected lock evidence: %+v", i)
 	}
 	var rootPID int
@@ -129,8 +131,13 @@ WHERE o.id=(SELECT max(id) FROM demo_shop.orders) GROUP BY o.total_cents,p.amoun
 		if err != nil {
 			t.Fatal(err)
 		}
-		i = d.Observe(s)
-		store.Update(s, i)
+		updates := d.Observe(s)
+		store.Update(s, updates...)
+		for _, update := range updates {
+			if update.ID == incidentID {
+				i = update
+			}
+		}
 	}
 	if i == nil || i.ID != incidentID || i.Status != detector.Resolved || i.ResolvedAt == nil {
 		t.Fatalf("recovery not confirmed: %+v", i)
@@ -152,5 +159,100 @@ WHERE o.id=(SELECT max(id) FROM demo_shop.orders) GROUP BY o.total_cents,p.amoun
 	s, err = pg.Collect(ctx)
 	if err != nil || s.Active != 0 {
 		t.Fatal("report did not finish", s, err)
+	}
+}
+
+func TestNewInvestigationsPostgresIntegration(t *testing.T) {
+	dsn := os.Getenv("DEMO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set DEMO_TEST_DATABASE_URL for real PostgreSQL tests")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(24)
+	// End one-shot workload sessions so PostgreSQL publishes their pending counters.
+	// The real demo continuously reuses its sessions; these short tests do not.
+	db.SetMaxIdleConns(0)
+	var name string
+	if err = db.QueryRowContext(ctx, "SELECT current_database()").Scan(&name); err != nil || name != "demo" {
+		t.Fatal("test requires a database named demo", err)
+	}
+	if err = Seed(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	pg, err := collector.New(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pg.Close()
+	for _, finding := range []detector.Finding{detector.FindingTempFileGrowth, detector.FindingDeadlock, detector.FindingActiveSessionsSurge} {
+		t.Run(string(finding), func(t *testing.T) {
+			d := detector.New(detector.Options{BaselineSamples: 3, ConfirmSamples: 1, RecoverySamples: 2, Factor: 3, MaxGap: 3 * time.Second})
+			collect := func() []*detector.Incident {
+				t.Helper()
+				s, err := pg.Collect(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				updates := d.Observe(s)
+				return updates
+			}
+			for range 4 {
+				collect()
+				pause(ctx, 100*time.Millisecond)
+			}
+			done := make(chan error, 1)
+			switch finding {
+			case detector.FindingTempFileGrowth:
+				done <- TempSpillIncident(ctx, db, 500*time.Millisecond)
+			case detector.FindingDeadlock:
+				done <- reproduceDeadlock(ctx, db)
+			case detector.FindingActiveSessionsSurge:
+				go func() { done <- SessionBurstIncident(ctx, db, 2*time.Second) }()
+			}
+			checkCtx, stop := context.WithTimeout(ctx, 5*time.Second)
+			defer stop()
+			var opened *detector.Incident
+			for opened == nil && checkCtx.Err() == nil {
+				for _, i := range collect() {
+					if i.Finding == finding && i.Status == detector.Open && i.Notify {
+						opened = i
+						break
+					}
+				}
+				if opened == nil {
+					pause(checkCtx, 100*time.Millisecond)
+				}
+			}
+			if opened == nil {
+				t.Fatal("PostgreSQL symptom did not produce an investigation")
+			}
+			if len(opened.Blockers) != 0 || opened.BlockingGraph != nil || opened.Trigger.Observed <= opened.Trigger.Threshold {
+				t.Fatalf("incorrect evidence for %s: %+v", finding, opened)
+			}
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			var resolved *detector.Incident
+			for resolved == nil && checkCtx.Err() == nil {
+				for _, i := range collect() {
+					if i.ID == opened.ID && i.Status == detector.Resolved {
+						resolved = i
+						break
+					}
+				}
+				if resolved == nil {
+					pause(checkCtx, 100*time.Millisecond)
+				}
+			}
+			if resolved == nil || !resolved.Notify || resolved.Recovery.NormalSamples != 2 {
+				t.Fatal("recovery was not confirmed for the same incident")
+			}
+		})
 	}
 }

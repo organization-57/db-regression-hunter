@@ -37,13 +37,16 @@ func TestStatusAndMetricsTrackCollection(t *testing.T) {
 		t.Fatal("empty store cannot be healthy")
 	}
 	at := time.Now().UTC()
-	s.Update(collector.Snapshot{At: at, LockWaiters: 2, BlockingGraph: &collector.BlockingGraph{At: at, Complete: true}}, &detector.Incident{ID: "episode", Status: detector.Open})
+	s.Update(collector.Snapshot{At: at, LockWaiters: 2, StatsReset: &at, PostmasterStart: at, BlockingGraph: &collector.BlockingGraph{At: at, Complete: true}}, &detector.Incident{ID: "episode", Status: detector.Open})
 	v := status()
 	if !v.Healthy || v.Latest.BlockingGraph == nil || len(v.Incidents) != 1 {
 		t.Fatal("status must contain monitoring state, graph and latest report context")
 	}
-	if strings.Contains(request("/api/status").Body.String(), "\"history") {
-		t.Fatal("status must not expose raw history or its metadata")
+	body := request("/api/status").Body.String()
+	for _, field := range []string{"history", "stats_reset", "postmaster_start"} {
+		if strings.Contains(body, "\""+field) {
+			t.Fatalf("status exposes internal field %s", field)
+		}
 	}
 	if !strings.Contains(request("/metrics").Body.String(), "hunter_lock_waiters 2") {
 		t.Fatal("missing Prometheus metrics")

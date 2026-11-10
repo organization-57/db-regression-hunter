@@ -24,9 +24,9 @@ var scenarios = map[string]scenario{
 	"slow_report":   {"oldest query age grows without Lock waits", ReportIncident},
 	"table_lock":    {"reads and writes wait for an exclusive table lock", TableLockIncident},
 	"lock_chain":    {"checkouts wait for a transaction that is itself blocked", LockChainIncident},
-	"temp_spill":    {"temporary bytes grow due to disk sorts; no age alert expected", TempSpillIncident},
+	"temp_spill":    {"temporary write rate grows; temp_file_growth expected", TempSpillIncident},
 	"session_burst": {"eight additional active sessions with long queries", SessionBurstIncident},
-	"deadlock":      {"PostgreSQL resolves deadlocks; rollback counter grows", DeadlockIncident},
+	"deadlock":      {"PostgreSQL resolves deadlocks; deadlock investigation expected", DeadlockIncident},
 }
 
 func parseScenarios(value string) ([]string, error) {

@@ -140,7 +140,10 @@ func (b *Bot) RunWithIncidentLookup(ctx context.Context, status func() string, l
 func FormatIncident(i detector.Incident) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Инцидент %s · %s\nНачало: %s\nСигнал: %s\n", i.ID, i.Status, i.StartedAt.Format(time.RFC3339), i.Finding)
-	fmt.Fprintf(&b, "Возраст запроса при обнаружении: %.2f s; baseline: %.2f s; порог: %.2f s\n", i.Trigger.Observed, i.Trigger.Baseline, i.Trigger.Threshold)
+	fmt.Fprintf(&b, "%s: %.2f; baseline: %.2f; порог: %.2f; пик: %.2f\n", i.Trigger.Metric, i.Trigger.Observed, i.Trigger.Baseline, i.Trigger.Threshold, i.Peak)
+	if i.Trigger.IntervalSeconds > 0 {
+		fmt.Fprintf(&b, "Интервал измерения: %.1f s\n", i.Trigger.IntervalSeconds)
+	}
 	for n, root := range i.Blockers {
 		if n == 3 {
 			fmt.Fprintf(&b, "Ещё блокировщиков: %d\n", len(i.Blockers)-n)
@@ -163,7 +166,7 @@ func FormatIncident(i detector.Incident) string {
 			fmt.Fprintf(&b, "Ожидание: %s\n", strings.Join(chain, " → "))
 		}
 	}
-	fmt.Fprintf(&b, "\nПик возраста запросов: %.2f s; ожидающих Lock: %d\nВосстановление: %d/%d; пропусков: %d", i.PeakQuerySeconds, i.PeakLockWaiters, i.Recovery.NormalSamples, i.Recovery.RequiredSamples, i.DataGaps)
+	fmt.Fprintf(&b, "\nВосстановление: %d/%d; пропусков: %d", i.Recovery.NormalSamples, i.Recovery.RequiredSamples, i.DataGaps)
 	if i.ResolvedAt != nil {
 		fmt.Fprintf(&b, "\nВосстановление подтверждено: %s", i.ResolvedAt.Format(time.RFC3339))
 	}

@@ -122,6 +122,10 @@ LIMIT 257`)
 
 func CloneSnapshot(s Snapshot) Snapshot {
 	s.BlockingGraph = CloneGraph(s.BlockingGraph)
+	if s.StatsReset != nil {
+		at := *s.StatsReset
+		s.StatsReset = &at
+	}
 	return s
 }
 

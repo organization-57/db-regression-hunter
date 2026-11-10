@@ -84,20 +84,22 @@ func run() error {
 		for {
 			s, err := pg.Collect(ctx)
 			if err != nil {
-				store.Failed(d.Missing(time.Now().UTC()))
+				store.Failed(d.Missing(time.Now().UTC())...)
 				if ctx.Err() == nil {
 					slog.Warn("PostgreSQL collection failed; recovery confirmation interrupted")
 				}
 			} else {
-				i := d.Observe(s)
-				store.Update(s, i)
-				if i != nil && i.Notify {
-					slog.Info("incident transition", "id", i.ID, "status", i.Status, "blockers", len(i.Blockers), "finding", i.Finding)
-					if bot != nil {
-						select {
-						case notifications <- *i:
-						default:
-							slog.Warn("notification queue full", "incident", i.ID)
+				updates := d.Observe(s)
+				store.Update(s, updates...)
+				for _, i := range updates {
+					if i.Notify {
+						slog.Info("incident transition", "id", i.ID, "status", i.Status, "blockers", len(i.Blockers), "finding", i.Finding)
+						if bot != nil {
+							select {
+							case notifications <- *i:
+							default:
+								slog.Warn("notification queue full", "incident", i.ID)
+							}
 						}
 					}
 				}

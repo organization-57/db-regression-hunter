@@ -18,6 +18,9 @@ type Snapshot struct {
 	BlocksRead         int64          `json:"blocks_read"`
 	BlocksHit          int64          `json:"blocks_hit"`
 	TempBytes          int64          `json:"temp_bytes"`
+	Deadlocks          int64          `json:"deadlocks"`
+	StatsReset         *time.Time     `json:"-"`
+	PostmasterStart    time.Time      `json:"-"`
 	BlockingGraph      *BlockingGraph `json:"blocking_graph,omitempty"`
 }
 
@@ -51,8 +54,8 @@ SELECT clock_timestamp(),
        (SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND state='active'),
        (SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock'),
        COALESCE((SELECT max(GREATEST(0, extract(epoch FROM clock_timestamp()-query_start))) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND state='active'), 0)::float8,
-       xact_commit, xact_rollback, blks_read, blks_hit, temp_bytes
-FROM pg_stat_database WHERE datname=current_database()`).Scan(&s.At, &s.Active, &s.LockWaiters, &s.OldestQuerySeconds, &s.Commits, &s.Rollbacks, &s.BlocksRead, &s.BlocksHit, &s.TempBytes)
+       xact_commit, xact_rollback, blks_read, blks_hit, temp_bytes, deadlocks, stats_reset, pg_postmaster_start_time()
+FROM pg_stat_database WHERE datname=current_database()`).Scan(&s.At, &s.Active, &s.LockWaiters, &s.OldestQuerySeconds, &s.Commits, &s.Rollbacks, &s.BlocksRead, &s.BlocksHit, &s.TempBytes, &s.Deadlocks, &s.StatsReset, &s.PostmasterStart)
 	if err != nil {
 		return s, err
 	}

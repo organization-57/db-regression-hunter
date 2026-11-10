@@ -16,8 +16,12 @@ func TestIncidentByID(t *testing.T) {
 	}
 	at := time.Now().UTC()
 	for n := range 101 {
+		status := detector.Resolved
+		if n == 100 {
+			status = detector.Open
+		}
 		s.Update(collector.Snapshot{At: at}, &detector.Incident{
-			ID: strconv.Itoa(n), Status: detector.Open, Finding: "lock_contention",
+			ID: strconv.Itoa(n), Status: status, Finding: detector.FindingLockContention,
 			BlockingGraph: &collector.BlockingGraph{Nodes: []collector.Session{{PID: 33}}},
 			Blockers:      []detector.Blocker{{PID: 33, Chains: [][]int{{11, 33}}}},
 		})
@@ -84,5 +88,23 @@ func TestMetricsViewOmitsReportAndGraphCopies(t *testing.T) {
 	}
 	if s.View(time.Minute, true).Incidents[0].ID != "episode" {
 		t.Fatal("metrics read mutated the report")
+	}
+}
+
+func TestParallelEpisodesAreUpdatedAndRetained(t *testing.T) {
+	s := &Store{}
+	snapshot := collector.Snapshot{At: time.Now()}
+	a, b := &detector.Incident{ID: "a", Status: detector.Open}, &detector.Incident{ID: "b", Status: detector.Open}
+	s.Update(snapshot, a, b)
+	a.Status = detector.Resolved
+	s.Update(snapshot, a)
+	if len(s.incidents) != 2 || s.incidents[0].Status != detector.Resolved || s.incidents[1].Status != detector.Open {
+		t.Fatal("updating one metric duplicated or closed another episode")
+	}
+	for n := 0; n < 105; n++ {
+		s.Update(snapshot, &detector.Incident{ID: strconv.Itoa(n), Status: detector.Resolved})
+	}
+	if len(s.incidents) != 100 || s.incidents[0].ID != "b" {
+		t.Fatal("retention evicted an open episode")
 	}
 }
