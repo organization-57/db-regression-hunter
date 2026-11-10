@@ -15,6 +15,7 @@ import (
 	"github.com/makeev/db-regression-hunter/internal/config"
 	"github.com/makeev/db-regression-hunter/internal/detector"
 	"github.com/makeev/db-regression-hunter/internal/httpapi"
+	"github.com/makeev/db-regression-hunter/internal/sqlstats"
 	"github.com/makeev/db-regression-hunter/internal/state"
 	"github.com/makeev/db-regression-hunter/internal/telegram"
 )
@@ -36,10 +37,13 @@ func run() error {
 		return fmt.Errorf("invalid PostgreSQL connection configuration")
 	}
 	defer pg.Close()
+	pg.SQLStatsEnabled = cfg.SQLStatsEnabled
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	store := &state.Store{}
 	d := detector.New(cfg.BaselineSamples, cfg.ConfirmSamples, cfg.DegradationFactor)
+	d.MaxSampleGap = 3 * cfg.PollInterval
+	sqlTracker := &sqlstats.Tracker{MaxSampleGap: 3 * cfg.PollInterval}
 	maxAge := 3 * cfg.PollInterval
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: httpapi.Handler(store, maxAge), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
 	var wg sync.WaitGroup
@@ -62,7 +66,7 @@ func run() error {
 					return "Расследований пока нет (возможен прогрев baseline)"
 				}
 				i := v.Incidents[len(v.Incidents)-1]
-				return fmt.Sprintf("%s\n%s\n%s", i.ID, i.StartedAt.Format(time.RFC3339), i.Hypothesis)
+				return fmt.Sprintf("%s\nСтатус: %s\n%s\n%s", i.ID, i.Status, i.StartedAt.Format(time.RFC3339), i.Hypothesis)
 			})
 		}()
 		go func() {
@@ -88,15 +92,17 @@ func run() error {
 			s, err := pg.Collect(ctx)
 			if err != nil {
 				store.Failed()
-				d.Reset()
+				d.CollectionFailed()
+				sqlTracker.Reset()
 				if ctx.Err() == nil {
-					slog.Warn("PostgreSQL collection failed; baseline reset")
+					slog.Warn("PostgreSQL collection failed; confirmation interrupted")
 				}
 			} else {
+				s.SQL = sqlTracker.Observe(s.Statements)
 				i := d.Observe(s)
 				store.Update(s, i)
-				if i != nil {
-					slog.Info("incident detected", "id", i.ID, "hypothesis", i.Hypothesis)
+				if i != nil && (i.Revision == 1 || i.Status == detector.Resolved) {
+					slog.Info("incident notification", "id", i.ID, "status", i.Status, "hypothesis", i.Hypothesis)
 					if bot != nil {
 						select {
 						case notifications <- *i:

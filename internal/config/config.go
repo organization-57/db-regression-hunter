@@ -12,6 +12,7 @@ type Config struct {
 	PollInterval                                                     time.Duration
 	BaselineSamples, ConfirmSamples                                  int
 	DegradationFactor                                                float64
+	SQLStatsEnabled                                                  bool
 }
 
 func Load() (Config, error) {
@@ -19,6 +20,9 @@ func Load() (Config, error) {
 	var err error
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("DATABASE_URL is required")
+	}
+	if c.SQLStatsEnabled, err = strconv.ParseBool(value("SQL_STATS_ENABLED", "true")); err != nil {
+		return c, fmt.Errorf("SQL_STATS_ENABLED must be a boolean")
 	}
 	if c.PollInterval, err = time.ParseDuration(value("POLL_INTERVAL", "10s")); err != nil || c.PollInterval < time.Second {
 		return c, fmt.Errorf("POLL_INTERVAL must be a duration >= 1s")

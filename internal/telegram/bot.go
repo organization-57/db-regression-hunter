@@ -62,7 +62,10 @@ func (b *Bot) Send(ctx context.Context, message string) error {
 }
 
 func (b *Bot) Notify(ctx context.Context, i detector.Incident) error {
-	message := fmt.Sprintf("Расследование %s\nНачало симптомов: %s\n%s\n\nДанные:\n%s\n\nСледующие шаги:\n%s", i.ID, i.StartedAt.Format(time.RFC3339), i.Hypothesis, strings.Join(i.Evidence, "\n"), strings.Join(i.NextSteps, "\n"))
+	message := fmt.Sprintf("Расследование %s\nСтатус: %s\nНачало симптомов: %s\n%s\n\nДанные:\n%s\n\nСледующие шаги:\n%s", i.ID, i.Status, i.StartedAt.Format(time.RFC3339), i.Hypothesis, strings.Join(i.Evidence, "\n"), strings.Join(i.NextSteps, "\n"))
+	if i.RecoveredAt != nil {
+		message += "\n\nВосстановление симптомов БД подтверждено: " + i.RecoveredAt.Format(time.RFC3339)
+	}
 	if b.grafanaURL != "" {
 		message += "\n\nGrafana: " + b.grafanaURL
 	}
