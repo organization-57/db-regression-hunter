@@ -1,6 +1,7 @@
 package evidence
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"sort"
@@ -10,13 +11,16 @@ import (
 	"github.com/makeev/db-regression-hunter/internal/collector"
 	"github.com/makeev/db-regression-hunter/internal/detector"
 	"github.com/makeev/db-regression-hunter/internal/sqlstats"
+	"github.com/makeev/db-regression-hunter/internal/sqltext"
 )
 
 const (
-	Schema          = "hunter.evidence/v2"
+	Schema          = "hunter.evidence/v3"
 	baselineSamples = 30
 	maxLocks        = 8
 	maxStatements   = 5
+	maxSessions     = 5
+	maxPlans        = 4
 	maxIncidents    = 8
 	maxText         = 64
 	maxStep         = time.Minute
@@ -34,6 +38,7 @@ type Package struct {
 	Statements        []Statement `json:"regressed_statements,omitempty"`
 	Sessions          []Session   `json:"long_running_sessions,omitempty"`
 	SQLStatistics     string      `json:"sql_statistics"`
+	SQLText           string      `json:"sql_text"`
 	MissingSources    []string    `json:"missing_sources"`
 }
 
@@ -78,6 +83,7 @@ type Lock struct {
 	BlockingApplication   string   `json:"blocking_application"`
 	BlockingState         string   `json:"blocking_state"`
 	BlockingWaitEvent     string   `json:"blocking_wait_event,omitempty"`
+	BlockingQuery         string   `json:"blocking_last_query,omitempty"`
 	TransactionAgeSeconds float64  `json:"blocking_transaction_age_seconds"`
 	BlockedPIDs           []int    `json:"blocked_pids"`
 	BlockedTotal          int      `json:"blocked_total_through_chain"`
@@ -93,6 +99,8 @@ type Session struct {
 	WaitEvent       string  `json:"wait_event,omitempty"`
 	QueryAgeSeconds float64 `json:"query_age_seconds"`
 	TransactionAge  float64 `json:"transaction_age_seconds"`
+	Query           string  `json:"query,omitempty"`
+	Plan            string  `json:"plan,omitempty"`
 }
 
 type Statement struct {
@@ -105,6 +113,8 @@ type Statement struct {
 	TempWritesPerCall  Change `json:"temp_writes_per_call"`
 	RowsPerCall        Change `json:"rows_per_call"`
 	LoadIncreased      bool   `json:"load_increased"`
+	Query              string `json:"query,omitempty"`
+	Plan               string `json:"plan,omitempty"`
 }
 
 type History struct {
@@ -131,7 +141,7 @@ var findingOrder = map[detector.Finding]int{
 }
 
 func Build(incidents []detector.Incident, h *History, current collector.Snapshot) Package {
-	p := Package{Schema: Schema, MissingSources: []string{}}
+	p := Package{Schema: Schema, SQLText: "not collected", MissingSources: []string{}}
 	incidents = append([]detector.Incident{}, incidents...)
 	sort.SliceStable(incidents, func(a, b int) bool {
 		if findingOrder[incidents[a].Finding] != findingOrder[incidents[b].Finding] {
@@ -460,7 +470,6 @@ func Clean(s string) string {
 
 func (p *Package) addMissing(baseline, gaps int) {
 	p.MissingSources = append(p.MissingSources,
-		"SQL texts and plans are not collected by design; statements are identified only by queryid",
 		"application metrics (request rate, errors, latency) are not connected",
 		"host metrics (CPU, disk I/O) are not connected",
 		"deploy, DDL and configuration change events are not connected")
@@ -501,17 +510,101 @@ func (p Package) IDs() map[string]bool {
 	return ids
 }
 
-func (p *Package) AddSessions(sessions []collector.Session) {
-	for _, s := range sessions {
-		if len(p.Sessions) == 5 {
-			return
+type Source interface {
+	Activity(ctx context.Context, pids []int) ([]collector.Activity, error)
+	StatementTexts(ctx context.Context, queryIDs []string) (map[string]string, error)
+	Plan(ctx context.Context, query string) (string, error)
+}
+
+func (p *Package) Enrich(ctx context.Context, src Source, withText bool) {
+	var pids []int
+	for _, l := range p.Locks {
+		pids = append(pids, l.BlockingPID)
+	}
+	activity, err := src.Activity(ctx, pids)
+	if err != nil {
+		p.MissingSources = append(p.MissingSources, "sessions at analysis time are unavailable")
+	}
+	p.addSessions(activity, withText)
+	if !withText {
+		p.SQLText = "disabled"
+		p.MissingSources = append(p.MissingSources, "SQL texts and plans are disabled by configuration; statements are identified only by queryid")
+		return
+	}
+	p.SQLText = "normalized: comments removed, every literal replaced with $n"
+	for n := range p.Locks {
+		for _, a := range activity {
+			if a.PID == p.Locks[n].BlockingPID {
+				p.Locks[n].BlockingQuery = a.Query
+			}
 		}
-		e := Session{ID: fmt.Sprintf("S%d", len(p.Sessions)+1), PID: s.PID, Application: Clean(s.Application), State: Clean(s.State),
-			QueryAgeSeconds: value(s.QueryAgeSeconds), TransactionAge: value(s.TransactionAgeSeconds)}
-		if s.WaitEventType != "" {
-			e.WaitEvent = Clean(s.WaitEventType + ":" + s.WaitEvent)
+	}
+	if len(p.Statements) > 0 {
+		var ids []string
+		for _, s := range p.Statements {
+			ids = append(ids, s.QueryID)
 		}
-		p.Sessions = append(p.Sessions, e)
+		texts, err := src.StatementTexts(ctx, ids)
+		if err != nil {
+			p.MissingSources = append(p.MissingSources, "texts of regressed statements are unavailable")
+		}
+		for n := range p.Statements {
+			p.Statements[n].Query = texts[p.Statements[n].QueryID]
+		}
+	}
+	p.addPlans(ctx, src)
+}
+
+func (p *Package) addSessions(activity []collector.Activity, withText bool) {
+	var active []collector.Activity
+	for _, a := range activity {
+		if a.State == "active" {
+			active = append(active, a)
+		}
+	}
+	sort.SliceStable(active, func(x, y int) bool { return active[x].QueryAgeSeconds > active[y].QueryAgeSeconds })
+	for _, a := range active[:min(len(active), maxSessions)] {
+		s := Session{ID: fmt.Sprintf("S%d", len(p.Sessions)+1), PID: a.PID, Application: Clean(a.Application), State: Clean(a.State),
+			QueryAgeSeconds: value(a.QueryAgeSeconds), TransactionAge: value(a.TransactionAgeSeconds)}
+		if a.WaitEventType != "" {
+			s.WaitEvent = Clean(a.WaitEventType + ":" + a.WaitEvent)
+		}
+		if withText {
+			s.Query = a.Query
+		}
+		p.Sessions = append(p.Sessions, s)
+	}
+}
+
+func (p *Package) addPlans(ctx context.Context, src Source) {
+	seen := map[string]bool{}
+	failed := map[string][]string{}
+	budget := maxPlans
+	plan := func(id, query string) string {
+		if seen[query] || budget == 0 || !sqltext.Explainable(query) {
+			return ""
+		}
+		seen[query] = true
+		budget--
+		text, err := src.Plan(ctx, query)
+		if err != nil {
+			failed[err.Error()] = append(failed[err.Error()], id)
+		}
+		return text
+	}
+	for n := range p.Statements {
+		p.Statements[n].Plan = plan(p.Statements[n].ID, p.Statements[n].Query)
+	}
+	for n := range p.Sessions {
+		p.Sessions[n].Plan = plan(p.Sessions[n].ID, p.Sessions[n].Query)
+	}
+	reasons := make([]string, 0, len(failed))
+	for reason := range failed {
+		reasons = append(reasons, reason)
+	}
+	sort.Strings(reasons)
+	for _, reason := range reasons {
+		p.MissingSources = append(p.MissingSources, fmt.Sprintf("plan for %s is unavailable: %s", strings.Join(failed[reason], ", "), reason))
 	}
 }
 

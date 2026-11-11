@@ -7,9 +7,10 @@ import (
 )
 
 const (
-	Pending = "pending"
-	Done    = "ok"
-	Failed  = "failed"
+	ResultSchema = "hunter.analysis/v1"
+	Pending      = "pending"
+	Done         = "ok"
+	Fallback     = "fallback"
 )
 
 var Categories = []string{
@@ -79,9 +80,11 @@ type Attempt struct {
 }
 
 type Result struct {
+	Schema      string            `json:"schema"`
 	ID          string            `json:"id"`
 	IncidentIDs []string          `json:"incident_ids"`
 	Status      string            `json:"status"`
+	Reason      string            `json:"reason,omitempty"`
 	Model       string            `json:"model,omitempty"`
 	StartedAt   time.Time         `json:"started_at"`
 	FinishedAt  *time.Time        `json:"finished_at,omitempty"`

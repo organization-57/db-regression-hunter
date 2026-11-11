@@ -1,0 +1,199 @@
+{
+ "scenario": "lock_chain",
+ "expect": [
+  "long_transaction",
+  "lock_contention"
+ ],
+ "evidence": {
+  "schema": "hunter.evidence/v3",
+  "incidents": [
+   {
+    "id": "I1",
+    "incident_id": "1794410902258188000-oldest_query_seconds",
+    "finding": "lock_contention",
+    "status": "open",
+    "started_at": "2026-11-11T15:28:12.250671Z",
+    "metric": "oldest_query_seconds",
+    "observed": 11.8,
+    "baseline": 0,
+    "threshold": 1,
+    "peak": 41.8
+   }
+  ],
+  "baseline_window": {
+   "from": "2026-11-11T15:23:42.255764Z",
+   "to": "2026-11-11T15:28:07.251278Z",
+   "samples": 30
+  },
+  "incident_window": {
+   "from": "2026-11-11T15:28:12.250671Z",
+   "to": "2026-11-11T15:28:52.255873Z",
+   "samples": 9
+  },
+  "metrics": [
+   {
+    "id": "M1",
+    "name": "oldest_active_query_age",
+    "unit": "s",
+    "incident_peak": 41.8,
+    "baseline": 0.296,
+    "incident": 21.8
+   },
+   {
+    "id": "M2",
+    "name": "active_sessions",
+    "unit": "sessions",
+    "incident_peak": 3,
+    "baseline": 0.067,
+    "incident": 3
+   },
+   {
+    "id": "M3",
+    "name": "lock_waiting_sessions",
+    "unit": "sessions",
+    "incident_peak": 3,
+    "baseline": 0,
+    "incident": 3
+   },
+   {
+    "id": "M4",
+    "name": "commits_per_second",
+    "unit": "tx/s",
+    "baseline": 15.6,
+    "incident": 12.9
+   },
+   {
+    "id": "M5",
+    "name": "rollbacks_per_second",
+    "unit": "tx/s",
+    "baseline": 0,
+    "incident": 0
+   },
+   {
+    "id": "M6",
+    "name": "deadlocks_per_second",
+    "unit": "1/s",
+    "baseline": 0,
+    "incident": 0
+   },
+   {
+    "id": "M7",
+    "name": "blocks_read_per_second",
+    "unit": "blocks/s",
+    "baseline": 0,
+    "incident": 0
+   },
+   {
+    "id": "M8",
+    "name": "temp_bytes_per_second",
+    "unit": "bytes/s",
+    "baseline": 0,
+    "incident": 0
+   },
+   {
+    "id": "M9",
+    "name": "cache_hit_ratio",
+    "unit": "%",
+    "baseline": 100,
+    "incident": 100
+   }
+  ],
+  "locks": [
+   {
+    "id": "L1",
+    "blocking_pid": 265,
+    "root": true,
+    "blocking_application": "hunter-demo",
+    "blocking_state": "idle in transaction",
+    "blocking_wait_event": "Client:ClientRead",
+    "blocking_last_query": "UPDATE demo_shop.inventory SET updated_at=now() WHERE product_id=$1",
+    "blocking_transaction_age_seconds": 41.8,
+    "blocked_pids": [
+     264
+    ],
+    "blocked_total_through_chain": 3,
+    "waiter_wait_events": [
+     "Lock:transactionid"
+    ],
+    "max_waiter_query_age_seconds": 41.8
+   },
+   {
+    "id": "L2",
+    "blocking_pid": 263,
+    "root": false,
+    "blocking_application": "hunter-demo",
+    "blocking_state": "active",
+    "blocking_wait_event": "Lock:transactionid",
+    "blocking_last_query": "UPDATE demo_shop.inventory SET quantity=CASE WHEN quantity>$2 THEN quantity-$3 ELSE $4 END, updated_at=now() WHERE product_id=$1",
+    "blocking_transaction_age_seconds": 41.1,
+    "blocked_pids": [
+     76
+    ],
+    "blocked_total_through_chain": 1,
+    "waiter_wait_events": [
+     "Lock:tuple"
+    ],
+    "max_waiter_query_age_seconds": 41.1
+   },
+   {
+    "id": "L3",
+    "blocking_pid": 264,
+    "root": false,
+    "blocking_application": "hunter-demo",
+    "blocking_state": "active",
+    "blocking_wait_event": "Lock:transactionid",
+    "blocking_last_query": "UPDATE demo_shop.inventory SET updated_at=now() WHERE product_id=$1",
+    "blocking_transaction_age_seconds": 41.8,
+    "blocked_pids": [
+     263
+    ],
+    "blocked_total_through_chain": 2,
+    "waiter_wait_events": [
+     "Lock:transactionid"
+    ],
+    "max_waiter_query_age_seconds": 41.1
+   }
+  ],
+  "lock_graph_complete": true,
+  "lock_graph_current": true,
+  "long_running_sessions": [
+   {
+    "id": "S1",
+    "pid": 264,
+    "application": "hunter-demo",
+    "state": "active",
+    "wait_event": "Lock:transactionid",
+    "query_age_seconds": 41.8,
+    "transaction_age_seconds": 41.8,
+    "query": "UPDATE demo_shop.inventory SET updated_at=now() WHERE product_id=$1"
+   },
+   {
+    "id": "S2",
+    "pid": 263,
+    "application": "hunter-demo",
+    "state": "active",
+    "wait_event": "Lock:transactionid",
+    "query_age_seconds": 41.1,
+    "transaction_age_seconds": 41.1,
+    "query": "UPDATE demo_shop.inventory SET quantity=CASE WHEN quantity>$2 THEN quantity-$3 ELSE $4 END, updated_at=now() WHERE product_id=$1"
+   },
+   {
+    "id": "S3",
+    "pid": 76,
+    "application": "hunter-demo",
+    "state": "active",
+    "wait_event": "Lock:tuple",
+    "query_age_seconds": 41.1,
+    "transaction_age_seconds": 41.1,
+    "query": "UPDATE demo_shop.inventory SET quantity=CASE WHEN quantity>$2 THEN quantity-$3 ELSE $4 END, updated_at=now() WHERE product_id=$1"
+   }
+  ],
+  "sql_statistics": "ready",
+  "sql_text": "normalized: comments removed, every literal replaced with $n",
+  "missing_sources": [
+   "application metrics (request rate, errors, latency) are not connected",
+   "host metrics (CPU, disk I/O) are not connected",
+   "deploy, DDL and configuration change events are not connected"
+  ]
+ }
+}

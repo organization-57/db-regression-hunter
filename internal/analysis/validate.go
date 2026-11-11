@@ -6,6 +6,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/makeev/db-regression-hunter/internal/evidence"
 )
@@ -44,6 +45,9 @@ func check(a *Analysis, p evidence.Package) validation {
 	}
 	if len(a.RootCauses) == 0 {
 		v.errors = append(v.errors, "root_causes is empty")
+	}
+	if text := foreignText(a); text != "" {
+		v.errors = append(v.errors, fmt.Sprintf("write every text field in Russian; %q is not", text))
 	}
 	for i, c := range a.RootCauses {
 		where := fmt.Sprintf("root_causes[%d]", i)
@@ -118,6 +122,28 @@ func check(a *Analysis, p evidence.Package) validation {
 		v.errors = append(v.errors, "recommendations is empty or every recommendation targeted sessions outside the evidence")
 	}
 	return v
+}
+
+func foreignText(a *Analysis) string {
+	texts := append([]string{a.Summary}, a.Assumptions...)
+	texts = append(texts, a.MissingData...)
+	for _, c := range a.RootCauses {
+		texts = append(texts, c.Title, c.Explanation)
+	}
+	for _, c := range a.Checks {
+		texts = append(texts, c.Step, c.Expect)
+	}
+	for _, r := range a.Recommendations {
+		texts = append(texts, r.Action, r.Verify)
+	}
+	for _, t := range texts {
+		for _, r := range t {
+			if unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul) {
+				return t
+			}
+		}
+	}
+	return ""
 }
 
 func contradiction(c Cause, p evidence.Package) string {

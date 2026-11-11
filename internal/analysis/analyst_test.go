@@ -162,7 +162,7 @@ func TestOnlyRootBlockersOfACompleteGraphMayBeTerminated(t *testing.T) {
 		p := pkg()
 		change(&p)
 		c := &fakeChat{steps: map[string][]step{"a": {{content: answer(nil)}, {content: answer(nil)}}}}
-		if r := analyst(c, "a").Analyze(context.Background(), p); r.Status != Failed {
+		if r := analyst(c, "a").Analyze(context.Background(), p); r.Status != Fallback {
 			t.Fatalf("%s must not allow terminating even the root: %s", name, outcomes(r))
 		}
 	}
@@ -191,13 +191,22 @@ func TestCategoryMustAgreeWithTheEvidence(t *testing.T) {
 	}
 	slow := answer(func(a map[string]any) { cause(a)["evidence"] = []string{"M1"} })
 	c = &fakeChat{steps: map[string][]step{"a": {{content: slow}, {content: slow}}}}
-	if r := analyst(c, "a").Analyze(context.Background(), pkg()); r.Status != Failed {
-		t.Fatalf("long_transaction without a cited blocker must not pass: %s", outcomes(r))
+	if r := analyst(c, "a").Analyze(context.Background(), pkg()); r.Status != Fallback || r.Reason != "invalid_answer" {
+		t.Fatalf("long_transaction without a cited blocker must not pass: %s %s", outcomes(r), r.Reason)
 	}
 	dead := answer(func(a map[string]any) { cause(a)["category"] = "deadlock" })
 	c = &fakeChat{steps: map[string][]step{"a": {{content: dead}, {content: dead}}}}
-	if r := analyst(c, "a").Analyze(context.Background(), pkg()); r.Status != Failed {
+	if r := analyst(c, "a").Analyze(context.Background(), pkg()); r.Status != Fallback {
 		t.Fatalf("deadlock without a deadlock incident must not pass: %s", outcomes(r))
+	}
+}
+
+func TestForeignScriptNeedsARepairRound(t *testing.T) {
+	mixed := answer(func(a map[string]any) { a["assumptions"] = []string{"разовая задача (批处理)"} })
+	c := &fakeChat{steps: map[string][]step{"a": {{content: mixed}, {content: answer(nil)}}}}
+	r := analyst(c, "a").Analyze(context.Background(), pkg())
+	if outcomes(r) != "a:invalid,a:valid" || !strings.Contains(strings.Join(r.Attempts[0].Errors, ""), "Russian") {
+		t.Fatalf("%s %+v", outcomes(r), r.Attempts)
 	}
 }
 
@@ -246,10 +255,14 @@ func TestFailoverHedgingWavesAndFailures(t *testing.T) {
 	c = &fakeChat{steps: map[string][]step{"a": {{wait: time.Minute}}}}
 	a = analyst(c, "a")
 	a.Deadline = 50 * time.Millisecond
-	if r := a.Analyze(context.Background(), pkg()); r.Status != Failed || !strings.Contains(r.Error, "no valid answer within 50ms") {
+	r := a.Analyze(context.Background(), pkg())
+	if r.Status != Fallback || r.Reason != "timeout" || !strings.Contains(r.Error, "no valid answer within 50ms") {
 		t.Fatalf("deadline: %+v", r)
 	}
-	if r := analyst(&fakeChat{}).Analyze(context.Background(), pkg()); r.Status != Failed || r.Error != "no model was called" {
+	if r.Schema != ResultSchema || r.Analysis == nil || r.Analysis.RootCauses[0].Category != "long_transaction" || r.Model != "" || len(r.Warnings) != 0 {
+		t.Fatalf("without an answer the rules explain the same evidence: %+v", r.Analysis)
+	}
+	if r := analyst(&fakeChat{}).Analyze(context.Background(), pkg()); r.Status != Fallback || r.Reason != "unavailable" || r.Error != "no model was called" {
 		t.Fatalf("no models: %+v", r)
 	}
 }

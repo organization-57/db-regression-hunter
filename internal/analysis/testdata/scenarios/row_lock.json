@@ -1,0 +1,171 @@
+{
+ "scenario": "row_lock",
+ "expect": [
+  "long_transaction",
+  "lock_contention"
+ ],
+ "evidence": {
+  "schema": "hunter.evidence/v3",
+  "incidents": [
+   {
+    "id": "I1",
+    "incident_id": "1794411712252696000-oldest_query_seconds",
+    "finding": "lock_contention",
+    "status": "open",
+    "started_at": "2026-11-11T15:41:42.256287Z",
+    "metric": "oldest_query_seconds",
+    "observed": 11,
+    "baseline": 0,
+    "threshold": 1,
+    "peak": 41.1
+   }
+  ],
+  "baseline_window": {
+   "from": "2026-11-11T15:37:12.260627Z",
+   "to": "2026-11-11T15:41:37.257941Z",
+   "samples": 30
+  },
+  "incident_window": {
+   "from": "2026-11-11T15:41:42.256287Z",
+   "to": "2026-11-11T15:42:22.264476Z",
+   "samples": 9
+  },
+  "metrics": [
+   {
+    "id": "M1",
+    "name": "oldest_active_query_age",
+    "unit": "s",
+    "incident_peak": 41.1,
+    "baseline": 0.257,
+    "incident": 21.1
+   },
+   {
+    "id": "M2",
+    "name": "active_sessions",
+    "unit": "sessions",
+    "incident_peak": 2,
+    "baseline": 0.4,
+    "incident": 2
+   },
+   {
+    "id": "M3",
+    "name": "lock_waiting_sessions",
+    "unit": "sessions",
+    "incident_peak": 2,
+    "baseline": 0.4,
+    "incident": 2
+   },
+   {
+    "id": "M4",
+    "name": "commits_per_second",
+    "unit": "tx/s",
+    "baseline": 15.1,
+    "incident": 13
+   },
+   {
+    "id": "M5",
+    "name": "rollbacks_per_second",
+    "unit": "tx/s",
+    "baseline": 0.05,
+    "incident": 0
+   },
+   {
+    "id": "M6",
+    "name": "deadlocks_per_second",
+    "unit": "1/s",
+    "baseline": 0,
+    "incident": 0
+   },
+   {
+    "id": "M7",
+    "name": "blocks_read_per_second",
+    "unit": "blocks/s",
+    "baseline": 0,
+    "incident": 0
+   },
+   {
+    "id": "M8",
+    "name": "temp_bytes_per_second",
+    "unit": "bytes/s",
+    "baseline": 0,
+    "incident": 0
+   },
+   {
+    "id": "M9",
+    "name": "cache_hit_ratio",
+    "unit": "%",
+    "baseline": 100,
+    "incident": 100
+   }
+  ],
+  "locks": [
+   {
+    "id": "L1",
+    "blocking_pid": 2284,
+    "root": true,
+    "blocking_application": "hunter-demo",
+    "blocking_state": "idle in transaction",
+    "blocking_wait_event": "Client:ClientRead",
+    "blocking_last_query": "UPDATE demo_shop.inventory SET updated_at=now() WHERE product_id=$1",
+    "blocking_transaction_age_seconds": 41.8,
+    "blocked_pids": [
+     2283
+    ],
+    "blocked_total_through_chain": 2,
+    "waiter_wait_events": [
+     "Lock:transactionid"
+    ],
+    "max_waiter_query_age_seconds": 41.1
+   },
+   {
+    "id": "L2",
+    "blocking_pid": 2283,
+    "root": false,
+    "blocking_application": "hunter-demo",
+    "blocking_state": "active",
+    "blocking_wait_event": "Lock:transactionid",
+    "blocking_last_query": "UPDATE demo_shop.inventory SET quantity=CASE WHEN quantity>$2 THEN quantity-$3 ELSE $4 END, updated_at=now() WHERE product_id=$1",
+    "blocking_transaction_age_seconds": 41.1,
+    "blocked_pids": [
+     263
+    ],
+    "blocked_total_through_chain": 1,
+    "waiter_wait_events": [
+     "Lock:tuple"
+    ],
+    "max_waiter_query_age_seconds": 41.1
+   }
+  ],
+  "lock_graph_complete": true,
+  "lock_graph_current": true,
+  "long_running_sessions": [
+   {
+    "id": "S1",
+    "pid": 2283,
+    "application": "hunter-demo",
+    "state": "active",
+    "wait_event": "Lock:transactionid",
+    "query_age_seconds": 41.1,
+    "transaction_age_seconds": 41.1,
+    "query": "UPDATE demo_shop.inventory SET quantity=CASE WHEN quantity>$2 THEN quantity-$3 ELSE $4 END, updated_at=now() WHERE product_id=$1"
+   },
+   {
+    "id": "S2",
+    "pid": 263,
+    "application": "hunter-demo",
+    "state": "active",
+    "wait_event": "Lock:tuple",
+    "query_age_seconds": 41.1,
+    "transaction_age_seconds": 41.1,
+    "query": "UPDATE demo_shop.inventory SET quantity=CASE WHEN quantity>$2 THEN quantity-$3 ELSE $4 END, updated_at=now() WHERE product_id=$1"
+   }
+  ],
+  "sql_statistics": "ready",
+  "sql_text": "normalized: comments removed, every literal replaced with $n",
+  "missing_sources": [
+   "application metrics (request rate, errors, latency) are not connected",
+   "host metrics (CPU, disk I/O) are not connected",
+   "deploy, DDL and configuration change events are not connected"
+  ]
+ }
+}

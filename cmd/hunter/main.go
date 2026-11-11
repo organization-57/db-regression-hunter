@@ -58,6 +58,7 @@ func run() error {
 	notifications := make(chan detector.Incident, 16)
 	if cfg.TelegramToken != "" {
 		bot = telegram.New(cfg.TelegramToken, cfg.TelegramChatID, cfg.GrafanaURL)
+		bot.Annotate = ai.withAnalysis
 		ai.notify(bot)
 		wg.Add(2)
 		go func() {

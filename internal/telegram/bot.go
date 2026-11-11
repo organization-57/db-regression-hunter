@@ -17,6 +17,7 @@ import (
 type Bot struct {
 	token, chatID, grafanaURL string
 	client                    *http.Client
+	Annotate                  func(text, incidentID string) string
 }
 
 func New(token, chatID, grafanaURL string) *Bot {
@@ -121,6 +122,9 @@ func (b *Bot) RunWithIncidentLookup(ctx context.Context, status func() string, l
 					answer = "Поиск расследований по ID недоступен"
 				} else if incident, ok := lookup(parts[1]); ok {
 					answer = b.IncidentSummary(incident)
+					if b.Annotate != nil {
+						answer = b.Annotate(answer, incident.ID)
+					}
 				} else {
 					answer = "Расследование не найдено. Хранятся только последние 100 расследований; после перезапуска они теряются."
 				}

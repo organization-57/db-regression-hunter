@@ -1,6 +1,8 @@
 package evidence
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -198,8 +200,68 @@ func TestLocksComeFromTheCurrentGraphAndAStaleGraphVouchesForNoPID(t *testing.T)
 	if pids := p.RootPIDs(); len(pids) != 1 || !pids["50"] || p.Locks[0].BlockingApplication != "migrate" {
 		t.Fatalf("the current root must win over the incident's old root: %v %+v", pids, p.Locks)
 	}
-	p.AddSessions([]collector.Session{{PID: 7, Application: "report", State: "active", WaitEventType: "Timeout", WaitEvent: "PgSleep", QueryAgeSeconds: 29.61}})
-	if len(p.Sessions) != 1 || p.Sessions[0].WaitEvent != "Timeout:PgSleep" || !p.IDs()["S1"] {
-		t.Fatalf("sessions %+v", p.Sessions)
+}
+
+type fakeSource struct {
+	pids        []int
+	activityErr error
+	plans       []string
+}
+
+func (f *fakeSource) Activity(_ context.Context, pids []int) ([]collector.Activity, error) {
+	f.pids = pids
+	return []collector.Activity{
+		{PID: 50, Application: "migrate", State: "idle in transaction", Query: "LOCK TABLE demo_shop.orders IN ACCESS EXCLUSIVE MODE"},
+		{PID: 8, Application: "report", State: "active", WaitEventType: "Timeout", WaitEvent: "PgSleep", QueryAgeSeconds: 12, Query: "SELECT pg_sleep($1)"},
+		{PID: 7, Application: "report", State: "active", WaitEventType: "Timeout", WaitEvent: "PgSleep", QueryAgeSeconds: 29.61, Query: "SELECT pg_sleep($1)"},
+		{PID: 9, Application: "shop", State: "active", QueryAgeSeconds: 3, Query: "UPDATE demo_shop.inventory SET quantity=$1 WHERE product_id=$2"},
+	}, f.activityErr
+}
+
+func (f *fakeSource) StatementTexts(_ context.Context, ids []string) (map[string]string, error) {
+	return map[string]string{"-4812771253": "SELECT o.id FROM demo_shop.orders o WHERE o.customer_id = $1"}, nil
+}
+
+func (f *fakeSource) Plan(_ context.Context, query string) (string, error) {
+	f.plans = append(f.plans, query)
+	if strings.Contains(query, "pg_sleep") {
+		return "", errors.New("permission_denied")
+	}
+	return "Seq Scan on orders o  (cost=0.00..180.00 rows=5 width=8)", nil
+}
+
+func TestEnrichAddsNormalizedTextsAndPlansOnce(t *testing.T) {
+	other := &collector.BlockingGraph{Complete: true, Nodes: []collector.Session{
+		{PID: 50, Application: "migrate", State: "idle in transaction"},
+		{PID: 51, State: "active", WaitEventType: "Lock", WaitEvent: "relation", BlockedBy: []int{50}},
+	}}
+	p := Build([]detector.Incident{lockIncident(), sqlIncident()}, history(), now(other))
+	src := &fakeSource{}
+	p.Enrich(context.Background(), src, true)
+	if len(src.pids) != 1 || src.pids[0] != 50 || p.Locks[0].BlockingQuery != "LOCK TABLE demo_shop.orders IN ACCESS EXCLUSIVE MODE" {
+		t.Fatalf("blocker text: %v %+v", src.pids, p.Locks[0])
+	}
+	if len(p.Sessions) != 3 || p.Sessions[0].PID != 7 || p.Sessions[0].WaitEvent != "Timeout:PgSleep" || !p.IDs()["S3"] {
+		t.Fatalf("sessions must be the active ones, oldest first: %+v", p.Sessions)
+	}
+	if q := p.Statements[0]; q.Query == "" || !strings.HasPrefix(q.Plan, "Seq Scan on orders") {
+		t.Fatalf("statement %+v", q)
+	}
+	if len(src.plans) != 2 || p.Sessions[1].Plan != "" || p.Sessions[2].Plan != "" {
+		t.Fatalf("one plan per distinct read-only text, none for UPDATE: %v", src.plans)
+	}
+	joined := strings.Join(p.MissingSources, "|")
+	if !strings.Contains(joined, "plan for S1 is unavailable: permission_denied") || strings.Contains(joined, "disabled") || !strings.HasPrefix(p.SQLText, "normalized") {
+		t.Fatalf("missing %v, sql_text %q", p.MissingSources, p.SQLText)
+	}
+
+	off := Build([]detector.Incident{lockIncident(), sqlIncident()}, history(), now(other))
+	quiet := &fakeSource{activityErr: errors.New("timeout")}
+	off.Enrich(context.Background(), quiet, false)
+	if off.SQLText != "disabled" || len(quiet.plans) != 0 || off.Locks[0].BlockingQuery != "" || off.Statements[0].Query != "" || off.Sessions[0].Query != "" {
+		t.Fatalf("texts must stay out when disabled: %+v", off)
+	}
+	if joined := strings.Join(off.MissingSources, "|"); !strings.Contains(joined, "sessions at analysis time are unavailable") || !strings.Contains(joined, "disabled by configuration") {
+		t.Fatalf("missing %v", off.MissingSources)
 	}
 }

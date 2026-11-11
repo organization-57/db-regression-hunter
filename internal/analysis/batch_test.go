@@ -72,13 +72,23 @@ func TestStuckAndOldIncidentsStayOutOfNewBatches(t *testing.T) {
 	}
 }
 
-func TestResultsReplaceByIDAndFindTheLastSuccess(t *testing.T) {
+func TestResultsReplaceByIDAndPreferTheModelAnswer(t *testing.T) {
 	var s Results
 	s.Put(Result{ID: "1", IncidentIDs: []string{"a", "b"}, Status: Pending})
 	s.Put(Result{ID: "1", IncidentIDs: []string{"a", "b"}, Status: Done})
-	s.Put(Result{ID: "2", IncidentIDs: []string{"a", "c"}, Status: Failed})
-	if r, ok := s.ForIncident("a"); !ok || r.ID != "1" || len(s.All()) != 2 {
-		t.Fatalf("a later failure must not hide an earlier success: %+v %v", r, ok)
+	s.Put(Result{ID: "2", IncidentIDs: []string{"a", "c"}, Status: Fallback})
+	s.Put(Result{ID: "3", IncidentIDs: []string{"c", "d"}, Status: Pending})
+	if r, ok := s.ForIncident("a"); !ok || r.ID != "1" || len(s.All()) != 3 {
+		t.Fatalf("a later fallback must not hide an earlier model answer: %+v %v", r, ok)
+	}
+	if r, _ := s.ForIncident("c"); r.ID != "2" {
+		t.Fatalf("a finished fallback beats a newer pending analysis: %+v", r)
+	}
+	if r, _ := s.ForIncident("d"); r.Status != Pending {
+		t.Fatalf("a running analysis is shown as pending: %+v", r)
+	}
+	if _, ok := s.ForIncident("z"); ok {
+		t.Fatal("unknown incident")
 	}
 	for n := 0; n < 60; n++ {
 		s.Put(Result{ID: string(rune('A' + n))})

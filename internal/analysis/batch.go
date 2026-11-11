@@ -101,18 +101,19 @@ func (s *Results) All() []Result {
 	return append([]Result{}, s.items...)
 }
 
+var preference = map[string]int{Done: 3, Fallback: 2, Pending: 1}
+
 func (s *Results) ForIncident(id string) (Result, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	best := -1
 	for n := len(s.items) - 1; n >= 0; n-- {
-		if s.items[n].Status != Done {
-			continue
-		}
-		for _, incident := range s.items[n].IncidentIDs {
-			if incident == id {
-				return s.items[n], true
-			}
+		if contains(s.items[n].IncidentIDs, id) && (best < 0 || preference[s.items[n].Status] > preference[s.items[best].Status]) {
+			best = n
 		}
 	}
-	return Result{}, false
+	if best < 0 {
+		return Result{}, false
+	}
+	return s.items[best], true
 }

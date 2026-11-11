@@ -8,8 +8,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/makeev/db-regression-hunter/internal/config"
 	"github.com/makeev/db-regression-hunter/internal/evidence"
 	"github.com/makeev/db-regression-hunter/internal/llm"
+)
+
+const (
+	callTimeout = 75 * time.Second
+	deadline    = 210 * time.Second
+	hedgeAfter  = 15 * time.Second
 )
 
 type Chatter interface {
@@ -24,6 +31,16 @@ type Analyst struct {
 	RepairRounds int
 	Waves        int
 	MinWave      time.Duration
+}
+
+func NewAnalyst(cfg config.LLM) *Analyst {
+	client := llm.New(llm.Config{BaseURL: cfg.BaseURL, APIKey: cfg.APIKey, Timeout: callTimeout, MaxTokens: 4096, Temperature: 0.2,
+		Extra: map[string]any{"chat_template_kwargs": map[string]any{"thinking": false, "enable_thinking": false}}})
+	return &Analyst{Client: client, Models: cfg.Models, Deadline: deadline, HedgeAfter: hedgeAfter, RepairRounds: 1, Waves: 2, MinWave: callTimeout / 2}
+}
+
+func NewResult(id string, p evidence.Package) Result {
+	return Result{Schema: ResultSchema, ID: id, IncidentIDs: p.IncidentIDs(), Status: Pending, StartedAt: time.Now().UTC()}
 }
 
 type outcome struct {
@@ -48,7 +65,8 @@ func (l *ledger) record(a Attempt, r llm.Reply) {
 
 func (a *Analyst) Analyze(ctx context.Context, p evidence.Package) Result {
 	start := time.Now()
-	r := Result{IncidentIDs: p.IncidentIDs(), StartedAt: start.UTC(), Evidence: &p}
+	r := NewResult("", p)
+	r.Evidence = &p
 	if a.Deadline > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, a.Deadline)
@@ -62,25 +80,37 @@ func (a *Analyst) Analyze(ctx context.Context, p evidence.Package) Result {
 		analysis := won.analysis
 		r.Status, r.Model, r.Analysis, r.Warnings = Done, won.model, &analysis, won.warnings
 	} else {
-		r.Status, r.Error = Failed, failure(ctx, a.Deadline, r.Attempts)
+		fallback := Rules(p)
+		v := check(&fallback, p)
+		r.Status, r.Analysis, r.Warnings = Fallback, &fallback, append(v.warnings, v.errors...)
+		r.Reason, r.Error = failure(ctx, a.Deadline, r.Attempts)
 	}
 	finished := time.Now().UTC()
 	r.FinishedAt, r.LatencyMs = &finished, time.Since(start).Milliseconds()
 	return r
 }
 
-func failure(ctx context.Context, deadline time.Duration, attempts []Attempt) string {
+func failure(ctx context.Context, deadline time.Duration, attempts []Attempt) (reason, detail string) {
 	if len(attempts) == 0 {
-		return "no model was called"
+		return "unavailable", "no model was called"
 	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return fmt.Sprintf("no valid answer within %s", deadline)
+		return "timeout", fmt.Sprintf("no valid answer within %s", deadline)
 	}
 	last := attempts[len(attempts)-1]
-	if last.Detail != "" {
-		return last.Model + ": " + last.Detail
+	reason = "unavailable"
+	for _, a := range attempts {
+		switch {
+		case a.Outcome == "invalid":
+			reason = "invalid_answer"
+		case a.Outcome == string(llm.KindTimeout) && reason == "unavailable":
+			reason = "timeout"
+		}
 	}
-	return last.Model + ": " + strings.Join(last.Errors, "; ")
+	if last.Detail != "" {
+		return reason, last.Model + ": " + last.Detail
+	}
+	return reason, last.Model + ": " + strings.Join(last.Errors, "; ")
 }
 
 func (a *Analyst) race(ctx context.Context, p evidence.Package) (outcome, *ledger) {

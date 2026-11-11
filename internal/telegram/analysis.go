@@ -29,6 +29,19 @@ var metricNames = map[string]string{
 
 var priorityNames = map[string]string{"now": "сейчас", "next": "далее", "later": "позже"}
 
+var reasonNames = map[string]string{"timeout": "нет ответа за отведённое время", "invalid_answer": "ответы моделей не прошли проверку", "unavailable": "брокер Gonka недоступен"}
+
+func query(q string) string {
+	if q == "" {
+		return ""
+	}
+	r := []rune(q)
+	if len(r) > 100 {
+		q = string(r[:100]) + "…"
+	}
+	return "; запрос: " + q
+}
+
 func confidence(c float64) string {
 	switch {
 	case c >= 0.75:
@@ -66,24 +79,27 @@ func fact(p *evidence.Package, id string) string {
 	}
 	for _, l := range p.Locks {
 		if l.ID == id {
-			return fmt.Sprintf("PID %d (%s, %s, транзакция %g с) блокирует %d", l.BlockingPID, l.BlockingApplication, l.BlockingState, l.TransactionAgeSeconds, l.BlockedTotal)
+			return fmt.Sprintf("PID %d (%s, %s, транзакция %g с) блокирует %d%s", l.BlockingPID, l.BlockingApplication, l.BlockingState, l.TransactionAgeSeconds, l.BlockedTotal, query(l.BlockingQuery))
 		}
 	}
 	for _, s := range p.Sessions {
 		if s.ID == id {
-			return fmt.Sprintf("PID %d (%s, %s) выполняется %g с", s.PID, s.Application, s.WaitEvent, s.QueryAgeSeconds)
+			return fmt.Sprintf("PID %d (%s, %s) выполняется %g с%s", s.PID, s.Application, s.WaitEvent, s.QueryAgeSeconds, query(s.Query))
 		}
 	}
 	for _, s := range p.Statements {
 		if s.ID == id {
-			return fmt.Sprintf("queryid %s: %s → %s мс на вызов, вызовов в секунду %s → %s", s.QueryID, number(s.MeanExecMS.Baseline), number(s.MeanExecMS.Incident),
-				number(s.CallsPerSecond.Baseline), number(s.CallsPerSecond.Incident))
+			return fmt.Sprintf("queryid %s: %s → %s мс на вызов, вызовов в секунду %s → %s%s", s.QueryID, number(s.MeanExecMS.Baseline), number(s.MeanExecMS.Incident),
+				number(s.CallsPerSecond.Baseline), number(s.CallsPerSecond.Incident), query(s.Query))
 		}
 	}
 	return ""
 }
 
 func FormatAnalysis(r analysis.Result) string {
+	if r.Status == analysis.Pending {
+		return "Анализ Gonka выполняется: результат придёт отдельным сообщением."
+	}
 	a := r.Analysis
 	if a == nil {
 		return ""
@@ -99,7 +115,15 @@ func FormatAnalysis(r analysis.Result) string {
 		}
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "Анализ Gonka · сигналы: %s\n\n%s\n", strings.Join(signals, ", "), a.Summary)
+	if r.Status == analysis.Fallback {
+		reason := reasonNames[r.Reason]
+		if reason == "" {
+			reason = r.Reason
+		}
+		fmt.Fprintf(&b, "Анализ Gonka не получен: %s. Предварительный вывод по правилам hunter, без LLM · сигналы: %s\n\n%s\n", reason, strings.Join(signals, ", "), a.Summary)
+	} else {
+		fmt.Fprintf(&b, "Анализ Gonka · сигналы: %s\n\n%s\n", strings.Join(signals, ", "), a.Summary)
+	}
 	if len(a.RootCauses) > 0 {
 		c := a.RootCauses[0]
 		name := categoryNames[c.Category]
@@ -149,7 +173,11 @@ func FormatAnalysis(r analysis.Result) string {
 	if len(a.MissingData) > 0 {
 		b.WriteString("Не хватает данных: " + strings.Join(a.MissingData, "; ") + "\n")
 	}
-	fmt.Fprintf(&b, "\nGonka %s · %.0f с · модель только объясняет, SQL не выполняется автоматически.", shortModel(r.Model), float64(r.LatencyMs)/1000)
+	if r.Status == analysis.Fallback {
+		fmt.Fprintf(&b, "\nПравила hunter после %.0f с ожидания Gonka · SQL не выполняется автоматически.", float64(r.LatencyMs)/1000)
+	} else {
+		fmt.Fprintf(&b, "\nGonka %s · %.0f с · модель только объясняет, SQL не выполняется автоматически.", shortModel(r.Model), float64(r.LatencyMs)/1000)
+	}
 	text := []rune(b.String())
 	if len(text) > 3500 {
 		return string(text[:3490]) + "…"

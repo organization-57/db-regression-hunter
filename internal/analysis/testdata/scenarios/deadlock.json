@@ -1,0 +1,109 @@
+{
+ "scenario": "deadlock",
+ "expect": [
+  "deadlock"
+ ],
+ "evidence": {
+  "schema": "hunter.evidence/v3",
+  "incidents": [
+   {
+    "id": "I1",
+    "incident_id": "1794411977251180000-deadlocks_delta",
+    "finding": "deadlock",
+    "status": "open",
+    "started_at": "2026-11-11T15:46:12.254689Z",
+    "metric": "deadlocks_delta",
+    "observed": 6,
+    "baseline": 0,
+    "threshold": 0,
+    "peak": 6,
+    "interval_seconds": 5
+   }
+  ],
+  "baseline_window": {
+   "from": "2026-11-11T15:41:42.256287Z",
+   "to": "2026-11-11T15:46:07.253906Z",
+   "samples": 30
+  },
+  "incident_window": {
+   "from": "2026-11-11T15:46:12.254689Z",
+   "to": "2026-11-11T15:46:42.251475Z",
+   "samples": 7
+  },
+  "metrics": [
+   {
+    "id": "M1",
+    "name": "oldest_active_query_age",
+    "unit": "s",
+    "incident_peak": 0.073,
+    "baseline": 0.237,
+    "incident": 0.026
+   },
+   {
+    "id": "M2",
+    "name": "active_sessions",
+    "unit": "sessions",
+    "incident_peak": 2,
+    "baseline": 0.133,
+    "incident": 0.857
+   },
+   {
+    "id": "M3",
+    "name": "lock_waiting_sessions",
+    "unit": "sessions",
+    "incident_peak": 2,
+    "baseline": 0.133,
+    "incident": 0.857
+   },
+   {
+    "id": "M4",
+    "name": "commits_per_second",
+    "unit": "tx/s",
+    "baseline": 15.4,
+    "incident": 16.2
+   },
+   {
+    "id": "M5",
+    "name": "rollbacks_per_second",
+    "unit": "tx/s",
+    "baseline": 0,
+    "incident": 1.83
+   },
+   {
+    "id": "M6",
+    "name": "deadlocks_per_second",
+    "unit": "1/s",
+    "baseline": 0,
+    "incident": 0.9
+   },
+   {
+    "id": "M7",
+    "name": "blocks_read_per_second",
+    "unit": "blocks/s",
+    "baseline": 0,
+    "incident": 0
+   },
+   {
+    "id": "M8",
+    "name": "temp_bytes_per_second",
+    "unit": "bytes/s",
+    "baseline": 0,
+    "incident": 0
+   },
+   {
+    "id": "M9",
+    "name": "cache_hit_ratio",
+    "unit": "%",
+    "baseline": 100,
+    "incident": 100
+   }
+  ],
+  "sql_statistics": "ready",
+  "sql_text": "normalized: comments removed, every literal replaced with $n",
+  "missing_sources": [
+   "application metrics (request rate, errors, latency) are not connected",
+   "host metrics (CPU, disk I/O) are not connected",
+   "deploy, DDL and configuration change events are not connected"
+  ]
+ }
+}
