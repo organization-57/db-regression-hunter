@@ -21,9 +21,10 @@ func TestIncidentCommand(t *testing.T) {
 	for _, tc := range []struct {
 		name, command, want string
 		lookupCalls         int
-		legacy              bool
+		legacy, annotate    bool
 	}{
 		{name: "found", command: "/incident " + i.ID, lookupCalls: 1},
+		{name: "annotated", command: "/incident " + i.ID, want: "Инцидент " + i.ID + " · open", lookupCalls: 1, annotate: true},
 		{name: "mention and whitespace", command: " /incident@HunterBot  " + i.ID + "  ", lookupCalls: 1},
 		{name: "not found", command: "/incident missing-id", want: "Расследование не найдено", lookupCalls: 1},
 		{name: "missing argument", command: "/incident", want: "Использование: /incident <ID>"},
@@ -38,6 +39,9 @@ func TestIncidentCommand(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 			b := New("test-token", "513", "https://grafana.test/d/hunter")
+			if tc.annotate {
+				b.Annotate = func(text, id string) string { return text + "\n\nanalysis:" + id }
+			}
 			lookupCalls, sendCalls, pollCalls := 0, 0, 0
 			lookup := func(id string) (detector.Incident, bool) { lookupCalls++; return i, id == i.ID }
 			b.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -76,6 +80,9 @@ func TestIncidentCommand(t *testing.T) {
 						}
 					} else if !strings.Contains(payload.Text, tc.want) {
 						t.Fatalf("expected %q in %q", tc.want, payload.Text)
+					}
+					if tc.annotate && !strings.HasSuffix(payload.Text, "analysis:"+i.ID) {
+						t.Fatalf("the analysis must follow the summary of the same incident: %q", payload.Text)
 					}
 					cancel()
 				default:

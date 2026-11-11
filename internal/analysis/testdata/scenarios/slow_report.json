@@ -1,0 +1,120 @@
+{
+ "scenario": "slow_report",
+ "expect": [
+  "slow_query"
+ ],
+ "evidence": {
+  "schema": "hunter.evidence/v4",
+  "incidents": [
+   {
+    "id": "I1",
+    "incident_id": "1794414865989908000-oldest_query_seconds",
+    "findings": [
+     "query_age_regression"
+    ],
+    "status": "open",
+    "started_at": "2026-11-11T16:34:15.998636Z",
+    "metric": "oldest_query_seconds",
+    "observed": 11.8,
+    "baseline": 0,
+    "threshold": 1,
+    "peak": 36.9
+   }
+  ],
+  "baseline_window": {
+   "from": "2026-11-11T16:29:45.996788Z",
+   "to": "2026-11-11T16:34:11.001563Z",
+   "samples": 30
+  },
+  "incident_window": {
+   "from": "2026-11-11T16:34:15.998636Z",
+   "to": "2026-11-11T16:34:50.993116Z",
+   "samples": 8
+  },
+  "metrics": [
+   {
+    "id": "M1",
+    "name": "oldest_active_query_age",
+    "unit": "s",
+    "incident_peak": 36.9,
+    "baseline": 0.297,
+    "incident": 19.4
+   },
+   {
+    "id": "M2",
+    "name": "active_sessions",
+    "unit": "sessions",
+    "incident_peak": 1,
+    "baseline": 0.533,
+    "incident": 1
+   },
+   {
+    "id": "M3",
+    "name": "lock_waiting_sessions",
+    "unit": "sessions",
+    "incident_peak": 0,
+    "baseline": 0,
+    "incident": 0
+   },
+   {
+    "id": "M4",
+    "name": "commits_per_second",
+    "unit": "tx/s",
+    "baseline": 15.5,
+    "incident": 15.6
+   },
+   {
+    "id": "M5",
+    "name": "rollbacks_per_second",
+    "unit": "tx/s",
+    "baseline": 0,
+    "incident": 0
+   },
+   {
+    "id": "M6",
+    "name": "deadlocks_per_second",
+    "unit": "1/s",
+    "baseline": 0,
+    "incident": 0
+   },
+   {
+    "id": "M7",
+    "name": "blocks_read_per_second",
+    "unit": "blocks/s",
+    "baseline": 0,
+    "incident": 0
+   },
+   {
+    "id": "M8",
+    "name": "temp_bytes_per_second",
+    "unit": "bytes/s",
+    "baseline": 0,
+    "incident": 0
+   },
+   {
+    "id": "M9",
+    "name": "cache_hit_ratio",
+    "unit": "%",
+    "baseline": 100,
+    "incident": 100
+   }
+  ],
+  "long_running_sessions": [
+   {
+    "id": "S1",
+    "pid": 510,
+    "application": "hunter-demo",
+    "state": "active",
+    "wait_event": "Timeout:PgSleep",
+    "query_age_seconds": 36.9,
+    "transaction_age_seconds": 36.9
+   }
+  ],
+  "sql_statistics": "ready",
+  "missing_sources": [
+   "application metrics (request rate, errors, latency) are not connected",
+   "host metrics (CPU, disk I/O) are not connected",
+   "deploy, DDL and configuration change events are not connected"
+  ]
+ }
+}

@@ -16,6 +16,9 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       GRAFANA_URL: ${GRAFANA_URL:-http://localhost:3000/d/hunter/postgresql-investigation}
+      GONKA_API_KEY: ${GONKA_API_KEY:-}
+      GONKA_MODELS: ${GONKA_MODELS:-}
+      ANALYSIS_DELAY: ${ANALYSIS_DELAY:-}
     ports: ["127.0.0.1:8080:8080"]
     depends_on:
       postgres:

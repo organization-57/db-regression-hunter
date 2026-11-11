@@ -1,0 +1,258 @@
+{
+ "scenario": "table_lock",
+ "expect": [
+  "blocking_ddl"
+ ],
+ "evidence": {
+  "schema": "hunter.evidence/v4",
+  "incidents": [
+   {
+    "id": "I1",
+    "incident_id": "1794415136000601000-oldest_query_seconds",
+    "findings": [
+     "query_age_regression",
+     "lock_wait",
+     "lock_contention",
+     "idle_in_transaction"
+    ],
+    "status": "open",
+    "started_at": "2026-11-11T16:38:45.994399Z",
+    "metric": "oldest_query_seconds",
+    "observed": 11,
+    "baseline": 0,
+    "threshold": 1,
+    "peak": 36
+   },
+   {
+    "id": "I2",
+    "incident_id": "1794415136000601000-active_sessions",
+    "findings": [
+     "active_sessions_surge"
+    ],
+    "status": "open",
+    "started_at": "2026-11-11T16:38:45.994399Z",
+    "metric": "active_sessions",
+    "observed": 6,
+    "baseline": 0,
+    "threshold": 4,
+    "peak": 7
+   }
+  ],
+  "baseline_window": {
+   "from": "2026-11-11T16:34:15.998636Z",
+   "to": "2026-11-11T16:38:40.992464Z",
+   "samples": 30
+  },
+  "incident_window": {
+   "from": "2026-11-11T16:38:45.994399Z",
+   "to": "2026-11-11T16:39:21.000151Z",
+   "samples": 8
+  },
+  "metrics": [
+   {
+    "id": "M1",
+    "name": "oldest_active_query_age",
+    "unit": "s",
+    "incident_peak": 36,
+    "baseline": 0.29,
+    "incident": 18.5
+   },
+   {
+    "id": "M2",
+    "name": "active_sessions",
+    "unit": "sessions",
+    "incident_peak": 7,
+    "baseline": 0.067,
+    "incident": 6.13
+   },
+   {
+    "id": "M3",
+    "name": "lock_waiting_sessions",
+    "unit": "sessions",
+    "incident_peak": 7,
+    "baseline": 0,
+    "incident": 6.13
+   },
+   {
+    "id": "M4",
+    "name": "commits_per_second",
+    "unit": "tx/s",
+    "baseline": 15.5,
+    "incident": 3
+   },
+   {
+    "id": "M5",
+    "name": "rollbacks_per_second",
+    "unit": "tx/s",
+    "baseline": 0,
+    "incident": 1.83
+   },
+   {
+    "id": "M6",
+    "name": "deadlocks_per_second",
+    "unit": "1/s",
+    "baseline": 0,
+    "incident": 0
+   },
+   {
+    "id": "M7",
+    "name": "blocks_read_per_second",
+    "unit": "blocks/s",
+    "baseline": 0,
+    "incident": 0.571
+   },
+   {
+    "id": "M8",
+    "name": "temp_bytes_per_second",
+    "unit": "bytes/s",
+    "baseline": 0,
+    "incident": 0
+   },
+   {
+    "id": "M9",
+    "name": "cache_hit_ratio",
+    "unit": "%",
+    "baseline": 100,
+    "incident": 99.7
+   }
+  ],
+  "locks": [
+   {
+    "id": "L1",
+    "blocking_pid": 656,
+    "root": true,
+    "blocking_application": "hunter-demo",
+    "blocking_state": "idle in transaction",
+    "blocking_wait_event": "Client:ClientRead",
+    "blocking_last_query": "lock table \"id_1\" . \"id_2\" in access exclusive mode",
+    "blocking_query_source": "last_statement",
+    "blocking_held_locks": [
+     "AccessExclusiveLock on id_1.id_2"
+    ],
+    "names_from": "I1",
+    "blocking_transaction_age_seconds": 36.8,
+    "blocked_pids": [
+     693,
+     1566,
+     1570,
+     1571,
+     1572
+    ],
+    "blocked_total_through_chain": 6,
+    "waiter_wait_events": [
+     "Lock:relation"
+    ],
+    "max_waiter_query_age_seconds": 36
+   },
+   {
+    "id": "L2",
+    "blocking_pid": 693,
+    "root": false,
+    "blocking_application": "hunter-demo",
+    "blocking_state": "active",
+    "blocking_wait_event": "Lock:relation",
+    "blocking_last_query": "insert into \"id_1\" . \"id_2\" ( \"id_4\" , \"id_5\" , \"id_6\" ) select $1 , '<redacted>' , \"id_7\" from \"id_1\" . \"id_8\" where \"id_9\" = $2 returning \"id_9\"",
+    "blocking_query_source": "active_statement",
+    "blocking_held_locks": [
+     "RowExclusiveLock on id_1.id_3"
+    ],
+    "names_from": "I1",
+    "blocking_transaction_age_seconds": 36,
+    "blocked_pids": [
+     72
+    ],
+    "blocked_total_through_chain": 1,
+    "waiter_wait_events": [
+     "Lock:transactionid"
+    ],
+    "max_waiter_query_age_seconds": 36
+   }
+  ],
+  "lock_graph_complete": true,
+  "lock_graph_current": true,
+  "long_running_sessions": [
+   {
+    "id": "S1",
+    "pid": 693,
+    "application": "hunter-demo",
+    "state": "active",
+    "wait_event": "Lock:relation",
+    "query_age_seconds": 37,
+    "transaction_age_seconds": 37
+   },
+   {
+    "id": "S2",
+    "pid": 72,
+    "application": "hunter-demo",
+    "state": "active",
+    "wait_event": "Lock:transactionid",
+    "query_age_seconds": 37,
+    "transaction_age_seconds": 37
+   },
+   {
+    "id": "S3",
+    "pid": 1566,
+    "application": "hunter-demo",
+    "state": "active",
+    "wait_event": "Lock:relation",
+    "query_age_seconds": 1.99,
+    "transaction_age_seconds": 1.99
+   },
+   {
+    "id": "S4",
+    "pid": 1572,
+    "application": "hunter-demo",
+    "state": "active",
+    "wait_event": "Lock:relation",
+    "query_age_seconds": 1.53,
+    "transaction_age_seconds": 1.53
+   },
+   {
+    "id": "S5",
+    "pid": 1571,
+    "application": "hunter-demo",
+    "state": "active",
+    "wait_event": "Lock:relation",
+    "query_age_seconds": 1.53,
+    "transaction_age_seconds": 1.53
+   }
+  ],
+  "tables": [
+   {
+    "id": "T1",
+    "names_from": "I1",
+    "table": "id_1.id_3",
+    "estimated_rows": 200,
+    "total_bytes": 98304,
+    "dead_tuples": 135,
+    "modifications_since_analyze": 63,
+    "last_analyze": "2026-11-11T16:38:23.897969+00:00",
+    "indexes": [
+     "create unique index \"id_13\" on \"id_1\" . \"id_3\" using btree ( \"id_10\" )"
+    ]
+   }
+  ],
+  "settings": {
+   "default_statistics_target": "100",
+   "effective_cache_size": "4GB",
+   "effective_io_concurrency": "1",
+   "jit": "on",
+   "max_parallel_workers_per_gather": "2",
+   "random_page_cost": "4",
+   "seq_page_cost": "1",
+   "server_version_num": "170011",
+   "work_mem": "4MB"
+  },
+  "sql_names": "identifiers are replaced with aliases id_N that are unique only within one incident (names_from); literals and comments are removed",
+  "sql_statistics": "ready",
+  "missing_sources": [
+   "SQL context of I1 root_blocker is incomplete: unsupported_statement, table_metadata_unavailable",
+   "SQL context of I1 blocker is incomplete: explain_unavailable, table_metadata_unavailable",
+   "SQL context of I1 waiter is incomplete: explain_unavailable",
+   "SQL context of I1 waiter is incomplete: explain_unavailable, table_metadata_unavailable",
+   "application metrics (request rate, errors, latency) are not connected",
+   "host metrics (CPU, disk I/O) are not connected",
+   "deploy, DDL and configuration change events are not connected"
+  ]
+ }
+}
