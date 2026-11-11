@@ -137,6 +137,9 @@ func TestSQLParallelEpisodesAndExistingDeadlockSignalStayIndependent(t *testing.
 	if a == nil || b == nil || a.ID == b.ID || dead == nil || !dead.HasFinding(FindingDeadlock) {
 		t.Fatal("SQL damaged parallel signals", updates)
 	}
+	if dead.ID != "1" || a.ID == dead.ID || b.ID == dead.ID || (a.ID != "2" && a.ID != "3") || (b.ID != "2" && b.ID != "3") {
+		t.Fatal("signals and SQL must share a short ID sequence", dead.ID, a.ID, b.ID)
+	}
 	for range 3 {
 		updates, _ = f.tick(5, 1, 10)
 	}
@@ -164,5 +167,10 @@ func TestAllSQLIncidentsAreDelivered(t *testing.T) {
 			t.Fatal("duplicate/invalid SQL incident", i)
 		}
 		ids[i.ID] = true
+	}
+	for n := 1; n <= 25; n++ {
+		if !ids[fmt.Sprint(n)] {
+			t.Fatalf("missing sequential incident ID %d", n)
+		}
 	}
 }

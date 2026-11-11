@@ -2,9 +2,9 @@ package detector
 
 import (
 	"encoding/json"
-	"fmt"
 	"math"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/makeev/db-regression-hunter/internal/collector"
@@ -118,10 +118,18 @@ type signal struct {
 }
 
 type Detector struct {
-	options      Options
-	signals      []signal
-	previous     *collector.Snapshot // One counter observation, never a raw history buffer.
-	sqlIncidents map[sqlstats.Identity]*Incident
+	incidentSequence uint64
+	options          Options
+	signals          []signal
+	previous         *collector.Snapshot // One counter observation, never a raw history buffer.
+	sqlIncidents     map[sqlstats.Identity]*Incident
+}
+
+// nextIncidentID is shared by every signal and SQL episode in this detector.
+// Like the in-memory incident history, the sequence resets on restart.
+func (d *Detector) nextIncidentID() string {
+	d.incidentSequence++
+	return strconv.FormatUint(d.incidentSequence, 10)
 }
 
 func New(options Options) *Detector {
@@ -194,7 +202,7 @@ func (d *Detector) Observe(s collector.Snapshot) []*Incident {
 		default:
 			continue
 		}
-		if i := r.observe(s, value, window, d.options); i != nil {
+		if i := r.observe(s, value, window, d.options, d.nextIncidentID); i != nil {
 			updates = append(updates, i)
 		}
 	}
@@ -214,7 +222,7 @@ func sameTime(a, b *time.Time) bool {
 	return a.Equal(*b)
 }
 
-func (r *signal) observe(s collector.Snapshot, value, interval float64, options Options) *Incident {
+func (r *signal) observe(s collector.Snapshot, value, interval float64, options Options, nextID func() string) *Incident {
 	if r.current == nil {
 		baseline, threshold := 0.0, 0.0
 		if !r.event {
@@ -247,7 +255,7 @@ func (r *signal) observe(s collector.Snapshot, value, interval float64, options 
 			return nil
 		}
 		r.current = &Incident{
-			ID: fmt.Sprintf("%d-%s", s.At.UnixNano(), r.metric), Status: Open, StartedAt: r.started, DetectedAt: s.At, UpdatedAt: s.At,
+			ID: nextID(), Status: Open, StartedAt: r.started, DetectedAt: s.At, UpdatedAt: s.At,
 			Findings: []Finding{r.finding}, Trigger: Trigger{Metric: r.metric, Observed: value, Baseline: baseline, Threshold: threshold, IntervalSeconds: interval},
 			Peak: value, Recovery: Recovery{RequiredSamples: options.RecoverySamples},
 		}

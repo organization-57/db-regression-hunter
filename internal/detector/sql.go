@@ -2,7 +2,6 @@ package detector
 
 import (
 	"encoding/json"
-	"fmt"
 	"sort"
 	"time"
 
@@ -129,7 +128,7 @@ func (d *Detector) observeSQL(report sqlstats.Report) []*Incident {
 			}
 			q := episode.Current
 			i = &Incident{
-				ID:     fmt.Sprintf("%d-sql-%d-%d-%s-%t", episode.DetectedAt.UnixNano(), q.DatabaseID, q.UserID, q.QueryID, q.TopLevel),
+				ID:     d.nextIncidentID(),
 				Status: Open, StartedAt: episode.StartedAt, DetectedAt: episode.DetectedAt,
 				Findings: []Finding{FindingSQLExecutionRegression},
 				Trigger:  Trigger{Metric: "sql_mean_exec_ms", Observed: q.MeanExecMS, Baseline: q.Comparison.BaselineMeanExecMS, Threshold: q.Comparison.ThresholdMS, IntervalSeconds: report.IntervalSeconds},
