@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="640" viewBox="0 0 1200 640" role="img" aria-labelledby="title description">
 <title id="title">Архитектура DB Regression Hunter</title>
-<desc id="description">PostgreSQL передаёт статистику Go-сервису. Сервис обнаруживает деградацию и отправляет расследование в Telegram. Prometheus хранит метрики для Grafana. Планируемый LLM API объясняет доказательства.</desc>
+<desc id="description">PostgreSQL передаёт статистику Go-сервису. Сервис обнаруживает деградацию и отправляет расследование в Telegram. Prometheus хранит метрики для Grafana. LLM API (Gonka) объясняет доказательства.</desc>
 <defs>
   <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/></marker>
   <marker id="purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#9333ea"/></marker>
@@ -62,10 +62,10 @@
 <rect x="740" y="430" width="170" height="90" rx="12" fill="#faf5ff" stroke="#a855f7" stroke-width="1.5" stroke-dasharray="6 5"/>
 <text x="825" y="460" text-anchor="middle" fill="#581c87" font-size="17" font-weight="700">LLM API</text>
 <text x="825" y="483" text-anchor="middle" fill="#581c87" font-size="13">Интерпретация фактов</text>
-<text x="825" y="501" text-anchor="middle" fill="#581c87" font-size="13">Планируется</text>
+<text x="825" y="501" text-anchor="middle" fill="#581c87" font-size="13">Gonka AI</text>
 <rect x="990" y="430" width="170" height="90" rx="12" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
 <text x="1075" y="460" text-anchor="middle" fill="#0f172a" font-size="17" font-weight="700">Разработчик</text>
 <text x="1075" y="483" text-anchor="middle" fill="#0f172a" font-size="13">Проверяет гипотезу</text>
 <text x="1075" y="501" text-anchor="middle" fill="#0f172a" font-size="13">Принимает решение</text>
-<text x="40" y="618" fill="#64748b" font-size="13">Сплошные связи — текущий контур. Пунктир — планируемая интеграция LLM.</text>
+<text x="40" y="618" fill="#64748b" font-size="13">Сплошные связи — текущий контур. Пунктир — необязательная интеграция LLM (включается GONKA_API_KEY).</text>
 </g></svg>
