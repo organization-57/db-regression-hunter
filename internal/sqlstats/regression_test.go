@@ -33,23 +33,23 @@ func TestSQLRegressionConfirmationFrozenBaselineAndRecovery(t *testing.T) {
 	f := newRegressionFixture()
 	f.warm()
 	pending := f.observe(10, 10)
-	if pending.PendingRegressions != 1 || pending.ActiveRegressions != 0 || pending.Top[0].Comparison.BaselineMeanExecMS != 1 {
+	if pending.PendingRegressions != 1 || pending.ActiveRegressions != 0 || pending.Queries[0].Comparison.BaselineMeanExecMS != 1 {
 		t.Fatalf("missing first suspicion: %+v", pending)
 	}
 	opened := f.observe(10, 20)
-	if opened.ActiveRegressions != 1 || len(opened.Regressions) != 1 || opened.Top[0].Comparison.BaselineMeanExecMS != 1 || opened.Top[0].Comparison.ThresholdMS != 6 {
+	if opened.ActiveRegressions != 1 || len(opened.Episodes) != 1 || opened.Queries[0].Comparison.BaselineMeanExecMS != 1 || opened.Queries[0].Comparison.ThresholdMS != 6 {
 		t.Fatalf("missing regression: %+v", opened)
 	}
-	episode := opened.Regressions[0]
+	episode := opened.Episodes[0]
 	if !episode.StartedAt.Equal(pending.From) || !episode.DetectedAt.Equal(opened.At) || episode.Current.Comparison.Confirmations != 2 {
 		t.Fatal("incorrect onset/confirmation", episode)
 	}
 	again := f.observe(10, 30)
-	if again.Regressions[0].DetectedAt != episode.DetectedAt || again.Top[0].Comparison.BaselineMeanExecMS != 1 {
+	if again.Episodes[0].DetectedAt != episode.DetectedAt || again.Queries[0].Comparison.BaselineMeanExecMS != 1 {
 		t.Fatal("episode duplicated or baseline contaminated", again)
 	}
 	recovering := f.observe(10, 1)
-	if recovering.ActiveRegressions != 1 || recovering.RecoveringRegressions != 1 || recovering.ResolvedRegressions != 0 {
+	if recovering.ActiveRegressions != 1 || recovering.RecoveringRegressions != 1 || resolvedCount(recovering) != 0 {
 		t.Fatal("one normal interval resolved regression", recovering)
 	}
 	relapse := f.observe(10, 10)
@@ -58,7 +58,7 @@ func TestSQLRegressionConfirmationFrozenBaselineAndRecovery(t *testing.T) {
 	}
 	f.observe(10, 1)
 	resolved := f.observe(10, 1)
-	if resolved.ActiveRegressions != 0 || resolved.UnknownRegressions != 0 || resolved.ResolvedRegressions != 1 || resolved.Regressions[0].RecoveredAt == nil {
+	if resolved.ActiveRegressions != 0 || resolved.UnknownRegressions != 0 || resolvedCount(resolved) != 1 || resolved.Episodes[0].RecoveredAt == nil {
 		t.Fatalf("missing confirmed recovery: %+v", resolved)
 	}
 	if episode.Status != "active" || episode.Current.Comparison.RecoverySamples != 0 {
@@ -66,7 +66,7 @@ func TestSQLRegressionConfirmationFrozenBaselineAndRecovery(t *testing.T) {
 	}
 	f.observe(10, 10)
 	reopened := f.observe(10, 10)
-	if reopened.ActiveRegressions != 1 || reopened.Regressions[0].DetectedAt == episode.DetectedAt {
+	if reopened.ActiveRegressions != 1 || reopened.Episodes[0].DetectedAt == episode.DetectedAt {
 		t.Fatal("new episode did not reopen", reopened)
 	}
 }
@@ -76,18 +76,18 @@ func TestSQLTrafficGrowthIsSeparateFromSlowExecution(t *testing.T) {
 	f.warm()
 	for range 5 {
 		r := f.observe(100, 1)
-		if r.ActiveRegressions != 0 || r.PendingRegressions != 0 || r.Top[0].Comparison.ExecFactor == nil || *r.Top[0].Comparison.ExecFactor != 1 {
+		if r.ActiveRegressions != 0 || r.PendingRegressions != 0 || r.Queries[0].Comparison.ExecFactor == nil || *r.Queries[0].Comparison.ExecFactor != 1 {
 			t.Fatal("load growth triggered slowdown", r)
 		}
 	}
 	f = newRegressionFixture()
 	f.warm()
 	r := f.observe(100, 10)
-	if !r.Top[0].Comparison.LoadIncreased || r.Top[0].Comparison.CallRateFactor == nil || *r.Top[0].Comparison.CallRateFactor != 10 {
+	if !r.Queries[0].Comparison.LoadIncreased || r.Queries[0].Comparison.CallRateFactor == nil || *r.Queries[0].Comparison.CallRateFactor != 10 {
 		t.Fatal("lost simultaneous load growth", r)
 	}
 	r = f.observe(100, 10)
-	if r.ActiveRegressions != 1 || !r.Regressions[0].Current.Comparison.LoadIncreased {
+	if r.ActiveRegressions != 1 || !r.Episodes[0].Current.Comparison.LoadIncreased {
 		t.Fatal("load growth concealed execution slowdown", r)
 	}
 }
@@ -98,7 +98,7 @@ func TestSQLUsesWeightedReferenceAndAbsoluteNoiseFloor(t *testing.T) {
 	f.observe(100, 2)
 	f.observe(10, 1)
 	r := f.observe(10, 3)
-	if c := r.Top[0].Comparison; c.BaselineCalls != 120 || c.BaselineMeanExecMS != 220.0/120 || c.State != "normal" {
+	if c := r.Queries[0].Comparison; c.BaselineCalls != 120 || c.BaselineMeanExecMS != 220.0/120 || c.State != "normal" {
 		t.Fatal("baseline is not weighted by executions", r)
 	}
 	f = newRegressionFixture()
@@ -117,7 +117,7 @@ func TestSQLInsufficientCallsAndIdleNeverConfirmOrResolve(t *testing.T) {
 	f := newRegressionFixture()
 	for range 5 {
 		r := f.observe(1, 100)
-		if r.BaselinedStatements != 0 || r.Top[0].Comparison.State != "insufficient_calls" {
+		if r.BaselinedStatements != 0 || r.Queries[0].Comparison.State != "insufficient_calls" {
 			t.Fatal("rare calls built a reference", r)
 		}
 	}
@@ -133,17 +133,17 @@ func TestSQLInsufficientCallsAndIdleNeverConfirmOrResolve(t *testing.T) {
 	f.observe(10, 10)
 	f.observe(10, 1)
 	idle := f.observe(0, 0)
-	if idle.UnknownRegressions != 1 || idle.ResolvedRegressions != 0 || idle.Regressions[0].Reason != "insufficient_calls" {
+	if idle.UnknownRegressions != 1 || resolvedCount(idle) != 0 || idle.Episodes[0].Reason != "insufficient_calls" {
 		t.Fatal("no calls falsely proved recovery", idle)
 	}
 	rare = f.observe(1, 1)
-	if rare.UnknownRegressions != 1 || rare.Regressions[0].Current.Comparison.State != "insufficient_calls" {
+	if rare.UnknownRegressions != 1 || rare.Episodes[0].Current.Comparison.State != "insufficient_calls" {
 		t.Fatal(rare)
 	}
-	if r := f.observe(10, 1); r.RecoveringRegressions != 1 || r.ResolvedRegressions != 0 {
+	if r := f.observe(10, 1); r.RecoveringRegressions != 1 || resolvedCount(r) != 0 {
 		t.Fatal("recovery bridged insufficient data", r)
 	}
-	if r := f.observe(10, 1); r.ResolvedRegressions != 1 {
+	if r := f.observe(10, 1); resolvedCount(r) != 1 {
 		t.Fatal(r)
 	}
 }
@@ -173,7 +173,7 @@ func TestSQLInterruptionsPreserveOpenEpisodeWithoutFalseRecovery(t *testing.T) {
 				f.tracker.Reset()
 			}
 			r := f.tracker.Observe(f.sample)
-			if r.UnknownRegressions != 1 || r.ResolvedRegressions != 0 || r.Regressions[0].DetectedAt != open.Regressions[0].DetectedAt {
+			if r.UnknownRegressions != 1 || resolvedCount(r) != 0 || r.Episodes[0].DetectedAt != open.Episodes[0].DetectedAt {
 				t.Fatal("interruption lost/falsely resolved episode", r)
 			}
 			if kind == "missing" {
@@ -186,10 +186,10 @@ func TestSQLInterruptionsPreserveOpenEpisodeWithoutFalseRecovery(t *testing.T) {
 				f.sample = next(f.sample)
 				f.tracker.Observe(f.sample)
 			}
-			if r = f.observe(10, 1); r.RecoveringRegressions != 1 || r.ResolvedRegressions != 0 {
+			if r = f.observe(10, 1); r.RecoveringRegressions != 1 || resolvedCount(r) != 0 {
 				t.Fatal("resumed without fresh recovery", r)
 			}
-			if r = f.observe(10, 1); r.ResolvedRegressions != 1 {
+			if r = f.observe(10, 1); resolvedCount(r) != 1 {
 				t.Fatal("did not recover from interruption", r)
 			}
 		})
@@ -210,12 +210,12 @@ func TestSQLResetDiscardsUnconfirmedReferenceAndIdleExpiresIt(t *testing.T) {
 	f.tracker.Regressor.MaxIdle = 15 * time.Second
 	f.observe(0, 0)
 	f.observe(0, 0)
-	if r = f.observe(10, 10); r.PendingRegressions != 0 || r.Top[0].Comparison.State != "warming_up" {
+	if r = f.observe(10, 10); r.PendingRegressions != 0 || r.Queries[0].Comparison.State != "warming_up" {
 		t.Fatal("stale reference was reused", r)
 	}
 }
 
-func TestSQLAnalysisBeforeTopTruncationAndBoundedOutput(t *testing.T) {
+func TestAllSQLAnalyzedRegardlessOfCallRate(t *testing.T) {
 	s := fixture()
 	s.Entries = nil
 	for n := range 25 {
@@ -244,18 +244,13 @@ func TestSQLAnalysisBeforeTopTruncationAndBoundedOutput(t *testing.T) {
 	}
 	observe(false)
 	r := observe(false)
-	if len(r.Top) != TopLimit || r.ActiveRegressions != 1 || r.Regressions[0].QueryID != "24" {
-		t.Fatal("SQL outside cost top was not analyzed", r)
-	}
-	for _, q := range r.Top {
-		if q.QueryID == "24" {
-			t.Fatal("fixture must remain outside top")
-		}
+	if len(r.Queries) != 25 || r.ActiveRegressions != 1 || r.Episodes[0].QueryID != "24" {
+		t.Fatal("low-frequency SQL was not analyzed", r)
 	}
 	observe(true)
 	r = observe(true)
-	if r.ActiveRegressions != 25 || len(r.Regressions) != TopLimit {
-		t.Fatal("summary lost episodes after truncation", r)
+	if r.ActiveRegressions != 25 || len(r.Episodes) != 25 {
+		t.Fatal("summary lost episodes", r)
 	}
 }
 
@@ -264,15 +259,19 @@ func TestSQLRatiosAndReportsAreIndependent(t *testing.T) {
 	f.warm()
 	f.observe(10, 10)
 	r := f.observe(10, 10)
-	clone := r.Clone()
-	*clone.Top[0].Comparison.ExecFactor = 999
-	*clone.Regressions[0].Current.Comparison.CallRateFactor = 999
-	if *r.Top[0].Comparison.ExecFactor != 10 || *r.Regressions[0].Current.Comparison.CallRateFactor != 1 {
-		t.Fatal("reports share comparison pointers")
+	clone := r.Queries[0].Clone()
+	*clone.Comparison.ExecFactor = 999
+	if *r.Queries[0].Comparison.ExecFactor != 10 {
+		t.Fatal("query clone shares comparison pointers")
 	}
-	*r.Regressions[0].Current.Comparison.ExecFactor = 888
+	summary := r.Clone()
+	if len(summary.Queries) != 0 || len(summary.Episodes) != 0 {
+		t.Fatal("summary retains internal SQL samples")
+	}
+
+	*r.Episodes[0].Current.Comparison.ExecFactor = 888
 	next := f.observe(0, 0)
-	if *next.Regressions[0].Current.Comparison.ExecFactor != 10 {
+	if *next.Episodes[0].Current.Comparison.ExecFactor != 10 {
 		t.Fatal("report shares episode state")
 	}
 	zero := newRegressionFixture()
@@ -280,7 +279,17 @@ func TestSQLRatiosAndReportsAreIndependent(t *testing.T) {
 		zero.observe(10, 0)
 	}
 	z := zero.observe(10, 10)
-	if z.Top[0].Comparison.ExecFactor != nil || z.Top[0].Comparison.State != "pending" {
+	if z.Queries[0].Comparison.ExecFactor != nil || z.Queries[0].Comparison.State != "pending" {
 		t.Fatal("zero baseline generated invalid ratio", z)
 	}
+}
+
+func resolvedCount(r Report) int {
+	n := 0
+	for _, e := range r.Episodes {
+		if e.Status == "resolved" {
+			n++
+		}
+	}
+	return n
 }

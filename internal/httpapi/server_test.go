@@ -37,12 +37,15 @@ func TestStatusAndMetricsTrackCollection(t *testing.T) {
 		t.Fatal("empty store cannot be healthy")
 	}
 	at := time.Now().UTC()
-	s.Update(collector.Snapshot{At: at, LockWaiters: 2, StatsReset: &at, PostmasterStart: at, BlockingGraph: &collector.BlockingGraph{At: at, Complete: true}}, &detector.Incident{ID: "episode", Status: detector.Open})
+	s.Update(collector.Snapshot{At: at, LockWaiters: 2, StatsReset: &at, PostmasterStart: at, BlockingGraph: &collector.BlockingGraph{At: at, Complete: true}}, &detector.Incident{ID: "episode", Status: detector.Open, Findings: []detector.Finding{detector.FindingQueryAgeRegression, detector.FindingLockWait}})
 	v := status()
 	if !v.Healthy || v.Latest.BlockingGraph == nil || len(v.Incidents) != 1 {
 		t.Fatal("status must contain monitoring state, graph and latest report context")
 	}
 	body := request("/api/status").Body.String()
+	if !v.Incidents[0].HasFinding(detector.FindingLockWait) || len(v.Incidents[0].Findings) != 2 || strings.Contains(body, `"finding":`) || strings.Contains(body, `"query_details":`) {
+		t.Fatal("status must expose findings as an array", body)
+	}
 	for _, field := range []string{"history", "stats_reset", "postmaster_start"} {
 		if strings.Contains(body, "\""+field) {
 			t.Fatalf("status exposes internal field %s", field)

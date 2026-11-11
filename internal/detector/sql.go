@@ -1,32 +1,122 @@
 package detector
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
 
+	"github.com/makeev/db-regression-hunter/internal/collector"
 	"github.com/makeev/db-regression-hunter/internal/sqlstats"
 )
 
-func (d *Detector) addSQLContext(i *Incident, report sqlstats.Report) {
-	if report.Status == "" {
-		return
-	}
-	if i.SQLContext == nil {
-		i.SQLContext = &sqlstats.Context{}
-		for _, previous := range d.sqlHistory {
-			if !previous.At.After(i.StartedAt) {
-				i.SQLContext.Before = sqlstats.AppendRecent(i.SQLContext.Before, previous)
-			} else {
-				i.SQLContext.Observe(previous)
+// EnrichQueries refreshes only when the selected participants or their queries
+// change. Each batch shares an anonymization dictionary; old batches are replaced.
+func (d *Detector) EnrichQueries(updates []*Incident, collect func([]collector.QueryTarget) collector.QueryBatch) {
+	for _, i := range updates {
+		if i.Status == Resolved {
+			continue
+		}
+		queries := queryParticipants(i)
+		if len(queries) == 0 || sameParticipants(i.Queries, queries) {
+			continue
+		}
+		targets := make([]collector.QueryTarget, len(queries))
+		for n := range queries {
+			targets[n] = queries[n].QueryTarget.Clone()
+		}
+		batch := collect(targets)
+		if len(batch.Details) != len(queries) {
+			continue
+		}
+		for n := range queries {
+			queries[n].Details = append(json.RawMessage(nil), batch.Details[n]...)
+		}
+		i.Queries = queries
+		i.Tables = append(json.RawMessage(nil), batch.Tables...)
+		i.Settings = append(json.RawMessage(nil), batch.Settings...)
+		// Save enrichment in the live episode, not just in this API update.
+		var current *Incident
+		if i.SQLRegression != nil {
+			current = d.sqlIncidents[i.SQLRegression.Identity]
+		} else {
+			for n := range d.signals {
+				if c := d.signals[n].current; c != nil && c.ID == i.ID {
+					current = c
+					break
+				}
 			}
 		}
+		if current != nil {
+			current.Queries = cloneQueries(i.Queries)
+			current.Tables = append(current.Tables[:0:0], i.Tables...)
+			current.Settings = append(current.Settings[:0:0], i.Settings...)
+		}
 	}
-	i.SQLContext.Observe(report)
+}
+
+func queryParticipants(i *Incident) []QueryEvidence {
+	var queries []QueryEvidence
+	if i.SQLRegression != nil {
+		id := i.SQLRegression.Identity
+		queries = append(queries, QueryEvidence{Role: "regressed", QueryTarget: collector.QueryTarget{Statement: &id}})
+	}
+	if i.BlockingGraph == nil {
+		return queries
+	}
+	roots := map[int]bool{}
+	blockers := map[int]bool{}
+	for _, root := range i.Blockers {
+		roots[root.PID] = true
+	}
+	for _, node := range i.BlockingGraph.Nodes {
+		for _, pid := range node.BlockedBy {
+			blockers[pid] = true
+		}
+	}
+	nodes := append([]collector.Session(nil), i.BlockingGraph.Nodes...)
+	sort.Slice(nodes, func(a, b int) bool { return nodes[a].PID < nodes[b].PID })
+	for _, role := range []string{"root_blocker", "blocker", "waiter"} {
+		for _, node := range nodes {
+			if len(queries) == 4 {
+				return queries
+			}
+			if node.BackendStart == nil || node.State == "unknown" {
+				continue
+			}
+			actual := "waiter"
+			if roots[node.PID] {
+				actual = "root_blocker"
+			} else if blockers[node.PID] {
+				actual = "blocker"
+			}
+			if actual != role {
+				continue
+			}
+			queries = append(queries, QueryEvidence{Role: role, QueryTarget: collector.QueryTarget{PID: node.PID, BackendStart: node.BackendStart, QueryStart: node.QueryStart, TransactionStart: node.TransactionStart, State: node.State}.Clone()})
+		}
+	}
+	return queries
+}
+
+func sameParticipants(a, b []QueryEvidence) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for n := range a {
+		x, y := a[n], b[n]
+		if x.Role != y.Role || x.PID != y.PID || x.State != y.State || !sameTime(x.BackendStart, y.BackendStart) || !sameTime(x.QueryStart, y.QueryStart) || !sameTime(x.TransactionStart, y.TransactionStart) {
+			return false
+		}
+		if (x.Statement == nil) != (y.Statement == nil) || x.Statement != nil && *x.Statement != *y.Statement {
+			return false
+		}
+	}
+	return true
 }
 
 // SQL has independent episodes per statement, matching main's per-signal model.
-// Complete internal episodes are consumed before the API's top-20 limit.
+// Every source episode is consumed, independently of the public summary.
 func (d *Detector) observeSQL(report sqlstats.Report) []*Incident {
 	var updates []*Incident
 	for _, episode := range report.Episodes {
@@ -41,16 +131,21 @@ func (d *Detector) observeSQL(report sqlstats.Report) []*Incident {
 			i = &Incident{
 				ID:     fmt.Sprintf("%d-sql-%d-%d-%s-%t", episode.DetectedAt.UnixNano(), q.DatabaseID, q.UserID, q.QueryID, q.TopLevel),
 				Status: Open, StartedAt: episode.StartedAt, DetectedAt: episode.DetectedAt,
-				Finding: FindingSQLExecutionRegression,
-				Trigger: Trigger{Metric: "sql_mean_exec_ms", Observed: q.MeanExecMS, Baseline: q.Comparison.BaselineMeanExecMS, Threshold: q.Comparison.ThresholdMS, IntervalSeconds: report.IntervalSeconds},
-				Peak:    q.MeanExecMS, Recovery: Recovery{RequiredSamples: d.options.RecoverySamples},
+				Findings: []Finding{FindingSQLExecutionRegression},
+				Trigger:  Trigger{Metric: "sql_mean_exec_ms", Observed: q.MeanExecMS, Baseline: q.Comparison.BaselineMeanExecMS, Threshold: q.Comparison.ThresholdMS, IntervalSeconds: report.IntervalSeconds},
+				Peak:     q.MeanExecMS, Recovery: Recovery{RequiredSamples: d.options.RecoverySamples},
 			}
 			d.sqlIncidents[episode.Identity] = i
 		}
 		wasUnknown := i.SQLRegression != nil && i.SQLRegression.Status == "unknown"
 		i.UpdatedAt = report.At
-		e := episode.Clone()
-		i.SQLRegression = &e
+		q := episode.Current
+		i.SQLRegression = &SQLRegression{
+			Identity: episode.Identity, Status: episode.Status, Reason: episode.Reason, LastObservedAt: episode.LastObservedAt,
+			Calls: q.Calls, MeanExecMS: q.MeanExecMS, CallsPerSecond: q.CallsPerSecond, BaselineCallsPerSecond: q.Comparison.BaselineCallsPerSecond,
+			SharedReadsPerCall: q.SharedReadsPerCall, SharedHitsPerCall: q.SharedHitsPerCall,
+			TempReadsPerCall: q.TempReadsPerCall, TempWritesPerCall: q.TempWritesPerCall, RowsPerCall: q.RowsPerCall,
+		}
 		if episode.Current.MeanExecMS > i.Peak {
 			i.Peak = episode.Current.MeanExecMS
 		}
@@ -77,7 +172,6 @@ func (d *Detector) observeSQL(report sqlstats.Report) []*Incident {
 			i.RecoveryStartedAt = nil
 			i.Recovery.NormalSamples = 0
 		}
-		d.addSQLContext(i, report)
 		update := CloneIncident(*i)
 		update.Notify = opening || i.Status == Resolved
 		updates = append(updates, &update)

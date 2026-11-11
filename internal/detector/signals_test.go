@@ -27,14 +27,14 @@ func TestIndependentSignalsAndRecovery(t *testing.T) {
 	}
 	first := tick(2, 8, 128*1024, 1)
 	dead := incidentFor(first, "deadlocks_delta")
-	if dead == nil || dead.Finding != FindingDeadlock || !dead.Notify || len(first) != 1 {
+	if dead == nil || !dead.HasFinding(FindingDeadlock) || !dead.Notify || len(first) != 1 {
 		t.Fatal("a single deadlock must open immediately")
 	}
 	second := tick(3, 8, 128*1024, 1)
 	ids := map[string]string{"deadlocks_delta": dead.ID}
 	for metric, finding := range map[string]Finding{"oldest_query_seconds": FindingQueryAgeRegression, "active_sessions": FindingActiveSessionsSurge, "temp_bytes_per_second": FindingTempFileGrowth} {
 		i := incidentFor(second, metric)
-		if i == nil || i.Finding != finding || !i.Notify || i.Status != Open {
+		if i == nil || !i.HasFinding(finding) || !i.Notify || i.Status != Open {
 			t.Fatalf("missing %s investigation: %+v", metric, i)
 		}
 		for _, id := range ids {

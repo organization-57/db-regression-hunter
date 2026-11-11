@@ -1,8 +1,10 @@
 package detector
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/makeev/db-regression-hunter/internal/collector"
@@ -25,6 +27,7 @@ const (
 	FindingTempFileGrowth         Finding = "temp_file_growth"
 	FindingDeadlock               Finding = "deadlock"
 	FindingSQLExecutionRegression Finding = "sql_execution_regression"
+	FindingIdleInTransaction      Finding = "idle_in_transaction"
 )
 
 type Trigger struct {
@@ -36,8 +39,7 @@ type Trigger struct {
 }
 
 type Blocker struct {
-	PID    int     `json:"pid"`
-	Chains [][]int `json:"chains"`
+	PID int `json:"pid"`
 }
 
 type Recovery struct {
@@ -53,7 +55,7 @@ type Incident struct {
 	UpdatedAt         time.Time                `json:"updated_at"`
 	RecoveryStartedAt *time.Time               `json:"recovery_started_at,omitempty"`
 	ResolvedAt        *time.Time               `json:"resolved_at,omitempty"`
-	Finding           Finding                  `json:"finding"`
+	Findings          []Finding                `json:"findings"`
 	Trigger           Trigger                  `json:"trigger"`
 	Peak              float64                  `json:"peak"`
 	Blockers          []Blocker                `json:"blockers,omitempty"`
@@ -61,8 +63,40 @@ type Incident struct {
 	Recovery          Recovery                 `json:"recovery"`
 	DataGaps          int                      `json:"data_gaps"`
 	Notify            bool                     `json:"-"`
-	SQLRegression     *sqlstats.Regression     `json:"sql_regression,omitempty"`
-	SQLContext        *sqlstats.Context        `json:"sql_context,omitempty"`
+	SQLRegression     *SQLRegression           `json:"sql_regression,omitempty"`
+	Tables            json.RawMessage          `json:"tables,omitempty"`
+	Settings          json.RawMessage          `json:"settings,omitempty"`
+	Queries           []QueryEvidence          `json:"queries,omitempty"`
+}
+
+type SQLRegression struct {
+	sqlstats.Identity
+	Status                 string    `json:"status"`
+	Reason                 string    `json:"reason,omitempty"`
+	LastObservedAt         time.Time `json:"last_observed_at"`
+	Calls                  int64     `json:"calls"`
+	MeanExecMS             float64   `json:"mean_exec_ms"`
+	CallsPerSecond         float64   `json:"calls_per_second"`
+	BaselineCallsPerSecond float64   `json:"baseline_calls_per_second"`
+	SharedReadsPerCall     float64   `json:"shared_reads_per_call"`
+	SharedHitsPerCall      float64   `json:"shared_hits_per_call"`
+	TempReadsPerCall       float64   `json:"temp_reads_per_call"`
+	TempWritesPerCall      float64   `json:"temp_writes_per_call"`
+	RowsPerCall            float64   `json:"rows_per_call"`
+}
+
+type QueryEvidence struct {
+	Role string `json:"role"`
+	collector.QueryTarget
+	Details json.RawMessage `json:"details"`
+}
+
+func (i Incident) HasFinding(f Finding) bool { return slices.Contains(i.Findings, f) }
+
+func (i *Incident) addFinding(f Finding) {
+	if !i.HasFinding(f) {
+		i.Findings = append(i.Findings, f)
+	}
 }
 
 type Options struct {
@@ -88,7 +122,6 @@ type Detector struct {
 	signals      []signal
 	previous     *collector.Snapshot // One counter observation, never a raw history buffer.
 	sqlIncidents map[sqlstats.Identity]*Incident
-	sqlHistory   []sqlstats.Report
 }
 
 func New(options Options) *Detector {
@@ -103,7 +136,6 @@ func New(options Options) *Detector {
 // Missing preserves open episodes but restarts confirmation and counter intervals.
 func (d *Detector) Missing(at time.Time) []*Incident {
 	d.previous = nil
-	d.sqlHistory = nil
 	updates := d.missingSQL(at)
 	for n := range d.signals {
 		r := &d.signals[n]
@@ -163,19 +195,10 @@ func (d *Detector) Observe(s collector.Snapshot) []*Incident {
 			continue
 		}
 		if i := r.observe(s, value, window, d.options); i != nil {
-			if s.SQL.Status != "" {
-				if r.current != nil {
-					d.addSQLContext(r.current, s.SQL)
-					i = r.update(i.Notify)
-				} else {
-					d.addSQLContext(i, s.SQL)
-				}
-			}
 			updates = append(updates, i)
 		}
 	}
 	updates = append(updates, d.observeSQL(s.SQL)...)
-	d.sqlHistory = sqlstats.AppendRecent(d.sqlHistory, s.SQL)
 	compact := s
 	compact.BlockingGraph = nil
 	compact.SQL = sqlstats.Report{}
@@ -225,7 +248,7 @@ func (r *signal) observe(s collector.Snapshot, value, interval float64, options 
 		}
 		r.current = &Incident{
 			ID: fmt.Sprintf("%d-%s", s.At.UnixNano(), r.metric), Status: Open, StartedAt: r.started, DetectedAt: s.At, UpdatedAt: s.At,
-			Finding: r.finding, Trigger: Trigger{Metric: r.metric, Observed: value, Baseline: baseline, Threshold: threshold, IntervalSeconds: interval},
+			Findings: []Finding{r.finding}, Trigger: Trigger{Metric: r.metric, Observed: value, Baseline: baseline, Threshold: threshold, IntervalSeconds: interval},
 			Peak: value, Recovery: Recovery{RequiredSamples: options.RecoverySamples},
 		}
 		r.enrich(s)
@@ -268,14 +291,22 @@ func (r *signal) enrich(s collector.Snapshot) {
 		return
 	}
 	i := r.current
-	if s.LockWaiters > 0 && len(i.Blockers) == 0 {
-		i.Finding = FindingLockWait
+	if s.LockWaiters > 0 {
+		i.addFinding(FindingLockWait)
 	}
 	roots := findBlockers(s.BlockingGraph)
 	if len(roots) > 0 {
+		i.addFinding(FindingLockWait)
 		i.Blockers = roots
 		i.BlockingGraph = collector.CloneGraph(s.BlockingGraph)
-		i.Finding = FindingLockContention
+		i.addFinding(FindingLockContention)
+		for _, root := range roots {
+			for _, node := range s.BlockingGraph.Nodes {
+				if node.PID == root.PID && (node.State == "idle in transaction" || node.State == "idle in transaction (aborted)") {
+					i.addFinding(FindingIdleInTransaction)
+				}
+			}
+		}
 	} else if i.BlockingGraph == nil && s.BlockingGraph != nil && len(s.BlockingGraph.Nodes) > 0 {
 		i.BlockingGraph = collector.CloneGraph(s.BlockingGraph)
 	}

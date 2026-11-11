@@ -67,11 +67,20 @@ func TestSQLAPIWithIndependentIncidentsAndSourceFailure(t *testing.T) {
 	observe(5, 10)
 	observe(5, 10)
 	opened := incidents()
-	if len(opened) != 1 || opened[0].Finding != detector.FindingSQLExecutionRegression || opened[0].SQLRegression.QueryID != "9223372036854775806" || opened[0].SQLContext == nil {
+	if len(opened) != 1 || !opened[0].HasFinding(detector.FindingSQLExecutionRegression) || opened[0].SQLRegression.QueryID != "9223372036854775806" {
 		t.Fatal("SQL evidence lost in API", opened)
 	}
 	if !sqlView().Healthy || sqlView().Latest.ActiveRegressions != 1 {
 		t.Fatal("SQL interval not exposed")
+	}
+	body := request("/api/status").Body.String()
+	for _, field := range []string{"sql_context", "history", "chains", "comparison", "current", "top", "regressions", "regression_started_at"} {
+		if strings.Contains(body, `"`+field+`":`) {
+			t.Fatalf("status exposes redundant/internal field %s", field)
+		}
+	}
+	if opened[0].SQLRegression.MeanExecMS != 10 || opened[0].Trigger.Baseline != 1 || opened[0].Trigger.Threshold != 6 {
+		t.Fatal("compact response lost regression evidence", opened[0])
 	}
 	if !strings.Contains(request("/metrics").Body.String(), "hunter_sql_regressions_active 1") {
 		t.Fatal("missing SQL metric")
@@ -96,8 +105,5 @@ func TestSQLAPIWithIndependentIncidentsAndSourceFailure(t *testing.T) {
 	closed := incidents()
 	if len(closed) != 1 || closed[0].ID != opened[0].ID || closed[0].Status != detector.Resolved || closed[0].ResolvedAt == nil {
 		t.Fatal("SQL resolution duplicated/lost episode", closed)
-	}
-	if len(sqlView().History) == 0 {
-		t.Fatal("missing SQL history")
 	}
 }

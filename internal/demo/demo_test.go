@@ -220,7 +220,7 @@ func TestNewInvestigationsPostgresIntegration(t *testing.T) {
 			var opened *detector.Incident
 			for opened == nil && checkCtx.Err() == nil {
 				for _, i := range collect() {
-					if i.Finding == finding && i.Status == detector.Open && i.Notify {
+					if i.HasFinding(finding) && i.Status == detector.Open && i.Notify {
 						opened = i
 						break
 					}

@@ -16,11 +16,10 @@ type View struct {
 }
 
 type Store struct {
-	mu         sync.RWMutex
-	latest     *collector.Snapshot
-	healthy    bool
-	incidents  []detector.Incident
-	sqlHistory []sqlstats.Report
+	mu        sync.RWMutex
+	latest    *collector.Snapshot
+	healthy   bool
+	incidents []detector.Incident
 }
 
 func (s *Store) Update(snapshot collector.Snapshot, incidents ...*detector.Incident) {
@@ -29,7 +28,6 @@ func (s *Store) Update(snapshot collector.Snapshot, incidents ...*detector.Incid
 	latest := collector.CloneSnapshot(snapshot)
 	s.latest = &latest
 	s.healthy = true
-	s.sqlHistory = sqlstats.AppendRecent(s.sqlHistory, snapshot.SQL)
 	for _, incident := range incidents {
 		s.upsert(incident)
 	}
@@ -94,8 +92,7 @@ func (s *Store) View(maxAge time.Duration, details bool) View {
 	if s.latest != nil {
 		snapshot := *s.latest
 		snapshot.BlockingGraph = nil
-		snapshot.SQL.Top = nil
-		snapshot.SQL.Regressions = nil
+		snapshot.SQL.Queries = nil
 		snapshot.SQL.Episodes = nil
 		snapshot.Statements = sqlstats.Snapshot{}
 		if details {
@@ -107,15 +104,14 @@ func (s *Store) View(maxAge time.Duration, details bool) View {
 }
 
 type SQLView struct {
-	Healthy bool              `json:"healthy"`
-	Latest  *sqlstats.Report  `json:"latest"`
-	History []sqlstats.Report `json:"history"`
+	Healthy bool             `json:"healthy"`
+	Latest  *sqlstats.Report `json:"latest"`
 }
 
 func (s *Store) SQLView(maxAge time.Duration) SQLView {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	v := SQLView{History: sqlstats.CloneReports(s.sqlHistory)}
+	v := SQLView{}
 	if s.latest == nil {
 		return v
 	}

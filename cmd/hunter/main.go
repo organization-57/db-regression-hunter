@@ -97,10 +97,16 @@ func run() error {
 			} else {
 				s.SQL = sqlTracker.Observe(s.Statements)
 				updates := d.Observe(s)
+				// Bound the entire batch, even when many SQL episodes open together.
+				detailsCtx, detailsCancel := context.WithTimeout(ctx, 3*time.Second)
+				d.EnrichQueries(updates, func(targets []collector.QueryTarget) collector.QueryBatch {
+					return pg.QueryContexts(detailsCtx, targets)
+				})
+				detailsCancel()
 				store.Update(s, updates...)
 				for _, i := range updates {
 					if i.Notify {
-						slog.Info("incident transition", "id", i.ID, "status", i.Status, "blockers", len(i.Blockers), "finding", i.Finding)
+						slog.Info("incident transition", "id", i.ID, "status", i.Status, "blockers", len(i.Blockers), "findings", i.Findings)
 						if bot != nil {
 							select {
 							case notifications <- *i:
