@@ -64,6 +64,14 @@ func findBlockers(g *collector.BlockingGraph) []Blocker {
 }
 
 func CloneIncident(i Incident) Incident {
+	if i.SQLRegression != nil {
+		r := i.SQLRegression.Clone()
+		i.SQLRegression = &r
+	}
+	if i.SQLContext != nil {
+		c := i.SQLContext.Clone()
+		i.SQLContext = &c
+	}
 	i.BlockingGraph = collector.CloneGraph(i.BlockingGraph)
 	i.Blockers = append([]Blocker{}, i.Blockers...)
 	for n := range i.Blockers {

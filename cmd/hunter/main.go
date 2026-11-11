@@ -15,6 +15,7 @@ import (
 	"github.com/makeev/db-regression-hunter/internal/config"
 	"github.com/makeev/db-regression-hunter/internal/detector"
 	"github.com/makeev/db-regression-hunter/internal/httpapi"
+	"github.com/makeev/db-regression-hunter/internal/sqlstats"
 	"github.com/makeev/db-regression-hunter/internal/state"
 	"github.com/makeev/db-regression-hunter/internal/telegram"
 )
@@ -36,10 +37,14 @@ func run() error {
 		return fmt.Errorf("invalid PostgreSQL connection configuration")
 	}
 	defer pg.Close()
+	pg.SQLStatsEnabled = cfg.SQLStatsEnabled
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	store := &state.Store{}
 	d := detector.New(detector.Options{BaselineSamples: cfg.BaselineSamples, ConfirmSamples: cfg.ConfirmSamples, RecoverySamples: cfg.RecoverySamples, Factor: cfg.DegradationFactor, MaxGap: 3 * cfg.PollInterval})
+	regressor := sqlstats.NewRegressor(cfg.BaselineSamples, cfg.ConfirmSamples, cfg.DegradationFactor, cfg.SQLMinCalls, cfg.SQLMinIncreaseMS)
+	regressor.RecoveryIntervals = cfg.RecoverySamples
+	sqlTracker := &sqlstats.Tracker{MaxSampleGap: 3 * cfg.PollInterval, Regressor: regressor}
 	maxAge := 3 * cfg.PollInterval
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: httpapi.Handler(store, maxAge), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
 	var wg sync.WaitGroup
@@ -84,11 +89,13 @@ func run() error {
 		for {
 			s, err := pg.Collect(ctx)
 			if err != nil {
+				sqlTracker.Reset()
 				store.Failed(d.Missing(time.Now().UTC())...)
 				if ctx.Err() == nil {
 					slog.Warn("PostgreSQL collection failed; recovery confirmation interrupted")
 				}
 			} else {
+				s.SQL = sqlTracker.Observe(s.Statements)
 				updates := d.Observe(s)
 				store.Update(s, updates...)
 				for _, i := range updates {

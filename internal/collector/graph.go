@@ -121,6 +121,9 @@ LIMIT 257`)
 }
 
 func CloneSnapshot(s Snapshot) Snapshot {
+	s.SQL = s.SQL.Clone()
+	// Raw counters belong only to the polling pipeline, not retained views.
+	s.Statements.Entries = nil
 	s.BlockingGraph = CloneGraph(s.BlockingGraph)
 	if s.StatsReset != nil {
 		at := *s.StatsReset

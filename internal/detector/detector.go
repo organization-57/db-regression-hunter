@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/makeev/db-regression-hunter/internal/collector"
+	"github.com/makeev/db-regression-hunter/internal/sqlstats"
 )
 
 const (
@@ -17,12 +18,13 @@ const (
 type Finding string
 
 const (
-	FindingQueryAgeRegression  Finding = "query_age_regression"
-	FindingLockWait            Finding = "lock_wait"
-	FindingLockContention      Finding = "lock_contention"
-	FindingActiveSessionsSurge Finding = "active_sessions_surge"
-	FindingTempFileGrowth      Finding = "temp_file_growth"
-	FindingDeadlock            Finding = "deadlock"
+	FindingQueryAgeRegression     Finding = "query_age_regression"
+	FindingLockWait               Finding = "lock_wait"
+	FindingLockContention         Finding = "lock_contention"
+	FindingActiveSessionsSurge    Finding = "active_sessions_surge"
+	FindingTempFileGrowth         Finding = "temp_file_growth"
+	FindingDeadlock               Finding = "deadlock"
+	FindingSQLExecutionRegression Finding = "sql_execution_regression"
 )
 
 type Trigger struct {
@@ -59,6 +61,8 @@ type Incident struct {
 	Recovery          Recovery                 `json:"recovery"`
 	DataGaps          int                      `json:"data_gaps"`
 	Notify            bool                     `json:"-"`
+	SQLRegression     *sqlstats.Regression     `json:"sql_regression,omitempty"`
+	SQLContext        *sqlstats.Context        `json:"sql_context,omitempty"`
 }
 
 type Options struct {
@@ -80,13 +84,15 @@ type signal struct {
 }
 
 type Detector struct {
-	options  Options
-	signals  []signal
-	previous *collector.Snapshot // One counter observation, never a raw history buffer.
+	options      Options
+	signals      []signal
+	previous     *collector.Snapshot // One counter observation, never a raw history buffer.
+	sqlIncidents map[sqlstats.Identity]*Incident
+	sqlHistory   []sqlstats.Report
 }
 
 func New(options Options) *Detector {
-	return &Detector{options: options, signals: []signal{
+	return &Detector{options: options, sqlIncidents: make(map[sqlstats.Identity]*Incident), signals: []signal{
 		{metric: "oldest_query_seconds", finding: FindingQueryAgeRegression, floor: 1},
 		{metric: "active_sessions", finding: FindingActiveSessionsSurge, floor: 4},
 		{metric: "temp_bytes_per_second", finding: FindingTempFileGrowth, floor: 64 * 1024},
@@ -97,7 +103,8 @@ func New(options Options) *Detector {
 // Missing preserves open episodes but restarts confirmation and counter intervals.
 func (d *Detector) Missing(at time.Time) []*Incident {
 	d.previous = nil
-	var updates []*Incident
+	d.sqlHistory = nil
+	updates := d.missingSQL(at)
 	for n := range d.signals {
 		r := &d.signals[n]
 		r.streak = 0
@@ -118,6 +125,7 @@ func (d *Detector) Missing(at time.Time) []*Incident {
 
 func (d *Detector) Observe(s collector.Snapshot) []*Incident {
 	previous := d.previous
+	var updates []*Incident
 	interval := 0.0
 	if previous != nil {
 		interval = s.At.Sub(previous.At).Seconds()
@@ -130,7 +138,6 @@ func (d *Detector) Observe(s collector.Snapshot) []*Incident {
 			interval = 0
 		}
 	}
-	var updates []*Incident
 	for n := range d.signals {
 		r := &d.signals[n]
 		value, window := 0.0, 0.0
@@ -156,11 +163,23 @@ func (d *Detector) Observe(s collector.Snapshot) []*Incident {
 			continue
 		}
 		if i := r.observe(s, value, window, d.options); i != nil {
+			if s.SQL.Status != "" {
+				if r.current != nil {
+					d.addSQLContext(r.current, s.SQL)
+					i = r.update(i.Notify)
+				} else {
+					d.addSQLContext(i, s.SQL)
+				}
+			}
 			updates = append(updates, i)
 		}
 	}
+	updates = append(updates, d.observeSQL(s.SQL)...)
+	d.sqlHistory = sqlstats.AppendRecent(d.sqlHistory, s.SQL)
 	compact := s
 	compact.BlockingGraph = nil
+	compact.SQL = sqlstats.Report{}
+	compact.Statements = sqlstats.Snapshot{}
 	d.previous = &compact
 	return updates
 }

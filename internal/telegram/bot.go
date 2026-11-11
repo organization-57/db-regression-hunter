@@ -144,6 +144,16 @@ func FormatIncident(i detector.Incident) string {
 	if i.Trigger.IntervalSeconds > 0 {
 		fmt.Fprintf(&b, "Интервал измерения: %.1f s\n", i.Trigger.IntervalSeconds)
 	}
+	if i.SQLRegression != nil {
+		r := i.SQLRegression
+		q := r.Current
+		c := q.Comparison
+		fmt.Fprintf(&b, "\nSQL %s · БД %d · роль %d\nСреднее: %.2f ms/вызов; baseline: %.2f ms\nВызовов/s: %.2f; baseline: %.2f\nSQL-состояние: %s", q.QueryID, q.DatabaseID, q.UserID, q.MeanExecMS, c.BaselineMeanExecMS, q.CallsPerSecond, c.BaselineCallsPerSecond, r.Status)
+		if r.Reason != "" {
+			fmt.Fprintf(&b, " (%s)", r.Reason)
+		}
+		fmt.Fprintf(&b, "\nПоследнее SQL-наблюдение: %s\nИзменение времени выполнения SQL не устанавливает причину или влияние на latency приложения.\n", r.LastObservedAt.Format(time.RFC3339))
+	}
 	for n, root := range i.Blockers {
 		if n == 3 {
 			fmt.Fprintf(&b, "Ещё блокировщиков: %d\n", len(i.Blockers)-n)

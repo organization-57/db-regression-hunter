@@ -6,6 +6,7 @@ import (
 
 	"github.com/makeev/db-regression-hunter/internal/collector"
 	"github.com/makeev/db-regression-hunter/internal/detector"
+	"github.com/makeev/db-regression-hunter/internal/sqlstats"
 )
 
 type View struct {
@@ -15,10 +16,11 @@ type View struct {
 }
 
 type Store struct {
-	mu        sync.RWMutex
-	latest    *collector.Snapshot
-	healthy   bool
-	incidents []detector.Incident
+	mu         sync.RWMutex
+	latest     *collector.Snapshot
+	healthy    bool
+	incidents  []detector.Incident
+	sqlHistory []sqlstats.Report
 }
 
 func (s *Store) Update(snapshot collector.Snapshot, incidents ...*detector.Incident) {
@@ -27,6 +29,7 @@ func (s *Store) Update(snapshot collector.Snapshot, incidents ...*detector.Incid
 	latest := collector.CloneSnapshot(snapshot)
 	s.latest = &latest
 	s.healthy = true
+	s.sqlHistory = sqlstats.AppendRecent(s.sqlHistory, snapshot.SQL)
 	for _, incident := range incidents {
 		s.upsert(incident)
 	}
@@ -91,10 +94,33 @@ func (s *Store) View(maxAge time.Duration, details bool) View {
 	if s.latest != nil {
 		snapshot := *s.latest
 		snapshot.BlockingGraph = nil
+		snapshot.SQL.Top = nil
+		snapshot.SQL.Regressions = nil
+		snapshot.SQL.Episodes = nil
+		snapshot.Statements = sqlstats.Snapshot{}
 		if details {
 			snapshot = collector.CloneSnapshot(*s.latest)
 		}
 		v.Latest = &snapshot
 	}
+	return v
+}
+
+type SQLView struct {
+	Healthy bool              `json:"healthy"`
+	Latest  *sqlstats.Report  `json:"latest"`
+	History []sqlstats.Report `json:"history"`
+}
+
+func (s *Store) SQLView(maxAge time.Duration) SQLView {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v := SQLView{History: sqlstats.CloneReports(s.sqlHistory)}
+	if s.latest == nil {
+		return v
+	}
+	r := s.latest.SQL.Clone()
+	v.Latest = &r
+	v.Healthy = s.healthy && time.Since(s.latest.At) <= maxAge && time.Since(r.At) <= maxAge && r.Available && r.Status == "ready"
 	return v
 }

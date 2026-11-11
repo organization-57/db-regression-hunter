@@ -6,25 +6,31 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/makeev/db-regression-hunter/internal/sqlstats"
 )
 
 type Snapshot struct {
-	At                 time.Time      `json:"at"`
-	Active             int            `json:"active_sessions"`
-	LockWaiters        int            `json:"lock_waiters"`
-	OldestQuerySeconds float64        `json:"oldest_query_seconds"`
-	Commits            int64          `json:"commits"`
-	Rollbacks          int64          `json:"rollbacks"`
-	BlocksRead         int64          `json:"blocks_read"`
-	BlocksHit          int64          `json:"blocks_hit"`
-	TempBytes          int64          `json:"temp_bytes"`
-	Deadlocks          int64          `json:"deadlocks"`
-	StatsReset         *time.Time     `json:"-"`
-	PostmasterStart    time.Time      `json:"-"`
-	BlockingGraph      *BlockingGraph `json:"blocking_graph,omitempty"`
+	At                 time.Time         `json:"at"`
+	Active             int               `json:"active_sessions"`
+	LockWaiters        int               `json:"lock_waiters"`
+	OldestQuerySeconds float64           `json:"oldest_query_seconds"`
+	Commits            int64             `json:"commits"`
+	Rollbacks          int64             `json:"rollbacks"`
+	BlocksRead         int64             `json:"blocks_read"`
+	BlocksHit          int64             `json:"blocks_hit"`
+	TempBytes          int64             `json:"temp_bytes"`
+	Deadlocks          int64             `json:"deadlocks"`
+	StatsReset         *time.Time        `json:"-"`
+	PostmasterStart    time.Time         `json:"-"`
+	BlockingGraph      *BlockingGraph    `json:"blocking_graph,omitempty"`
+	SQL                sqlstats.Report   `json:"sql"`
+	Statements         sqlstats.Snapshot `json:"-"`
 }
 
-type Postgres struct{ db *sql.DB }
+type Postgres struct {
+	db              *sql.DB
+	SQLStatsEnabled bool
+}
 
 func New(dsn string) (*Postgres, error) {
 	db, err := sql.Open("pgx", dsn)
@@ -34,7 +40,7 @@ func New(dsn string) (*Postgres, error) {
 	db.SetMaxOpenConns(2)
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(5 * time.Minute)
-	return &Postgres{db: db}, nil
+	return &Postgres{db: db, SQLStatsEnabled: true}, nil
 }
 
 func (p *Postgres) Close() error { return p.db.Close() }
@@ -63,5 +69,10 @@ FROM pg_stat_database WHERE datname=current_database()`).Scan(&s.At, &s.Active, 
 	if err != nil {
 		return s, err
 	}
-	return s, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return s, err
+	}
+	// Optional SQL diagnostics cannot turn a successful core snapshot into an error.
+	s.Statements = p.collectStatements(ctx)
+	return s, nil
 }

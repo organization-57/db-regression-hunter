@@ -13,6 +13,9 @@ type Config struct {
 	BaselineSamples, ConfirmSamples                                  int
 	DegradationFactor                                                float64
 	RecoverySamples                                                  int
+	SQLStatsEnabled                                                  bool
+	SQLMinCalls                                                      int64
+	SQLMinIncreaseMS                                                 float64
 }
 
 func Load() (Config, error) {
@@ -20,6 +23,15 @@ func Load() (Config, error) {
 	var err error
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("DATABASE_URL is required")
+	}
+	if c.SQLStatsEnabled, err = strconv.ParseBool(value("SQL_STATS_ENABLED", "true")); err != nil {
+		return c, fmt.Errorf("SQL_STATS_ENABLED must be a boolean")
+	}
+	if c.SQLMinCalls, err = strconv.ParseInt(value("SQL_MIN_CALLS", "5"), 10, 64); err != nil || c.SQLMinCalls < 1 || c.SQLMinCalls > 1000000 {
+		return c, fmt.Errorf("SQL_MIN_CALLS must be between 1 and 1000000")
+	}
+	if c.SQLMinIncreaseMS, err = strconv.ParseFloat(value("SQL_MIN_INCREASE_MS", "5"), 64); err != nil || !(c.SQLMinIncreaseMS >= 0 && c.SQLMinIncreaseMS < 1000000) {
+		return c, fmt.Errorf("SQL_MIN_INCREASE_MS must be between 0 inclusive and 1000000 exclusive")
 	}
 	if c.PollInterval, err = time.ParseDuration(value("POLL_INTERVAL", "10s")); err != nil || c.PollInterval < time.Second {
 		return c, fmt.Errorf("POLL_INTERVAL must be a duration >= 1s")
