@@ -69,7 +69,7 @@ func run() error {
 			}, func() string {
 				v := store.View(maxAge, true)
 				if len(v.Incidents) == 0 {
-					return "Расследований пока нет (возможен прогрев baseline)"
+					return "Нет замеченных инцидентов"
 				}
 				i := v.Incidents[len(v.Incidents)-1]
 				return ai.withAnalysis(bot.IncidentSummary(i), i.ID)
