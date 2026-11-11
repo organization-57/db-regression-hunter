@@ -166,12 +166,11 @@ func FormatIncident(i detector.Incident) string {
 	}
 	if i.SQLRegression != nil {
 		r := i.SQLRegression
-		q := r
-		fmt.Fprintf(&b, "\nSQL %s · БД %d · роль %d\nСреднее: %.2f ms/вызов; baseline: %.2f ms\nВызовов/s: %.2f; baseline: %.2f\nSQL-состояние: %s", q.QueryID, q.DatabaseID, q.UserID, q.MeanExecMS, i.Trigger.Baseline, q.CallsPerSecond, q.BaselineCallsPerSecond, r.Status)
-		if r.Reason != "" {
-			fmt.Fprintf(&b, " (%s)", r.Reason)
+		fmt.Fprintf(&b, "\nSQL %s\nСреднее: %.2f ms/вызов; baseline: %.2f ms\nВызовов/s: %.2f; baseline: %.2f\n", r.QueryID, r.MeanExecMS, i.Trigger.Baseline, r.CallsPerSecond, r.BaselineCallsPerSecond)
+		if r.Status == "unknown" {
+			b.WriteString("Недостаточно данных, чтобы оценить восстановление\n")
 		}
-		fmt.Fprintf(&b, "\nПоследнее SQL-наблюдение: %s\nИзменение времени выполнения SQL не устанавливает причину или влияние на latency приложения.\n", formatTime(r.LastObservedAt))
+		fmt.Fprintf(&b, "Последнее SQL-наблюдение: %s\n", formatTime(r.LastObservedAt))
 	}
 	for n, root := range i.Blockers {
 		if n == 3 {
