@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"html"
 	"net/url"
 	"strconv"
 	"strings"
@@ -19,16 +20,17 @@ func TestIncidentSummaryWindow(t *testing.T) {
 		{ID: "second", Status: detector.Resolved, StartedAt: started.Add(-time.Hour), DetectedAt: started.Add(-30 * time.Minute), Findings: []detector.Finding{"query_age_regression"}},
 	} {
 		message := b.IncidentSummary(i)
-		prefix := FormatIncident(i) + "\n\nGrafana: "
+		prefix := html.EscapeString(FormatIncident(i)) + "\n\n📊 <a href=\""
 		if !strings.HasPrefix(message, prefix) {
 			t.Fatal("missing incident summary", message)
 		}
-		u, err := url.Parse(strings.TrimPrefix(message, prefix))
+		link := strings.TrimSuffix(strings.TrimPrefix(message, prefix), "\">Ссылка на окно в Grafana</a>")
+		u, err := url.Parse(html.UnescapeString(link))
 		if err != nil {
 			t.Fatal(err)
 		}
 		q := u.Query()
-		if q.Get("from") != strconv.FormatInt(i.StartedAt.Add(-5*time.Minute).UnixMilli(), 10) || q.Get("to") != strconv.FormatInt(i.DetectedAt.Add(5*time.Minute).UnixMilli(), 10) || q.Get("orgId") != "2" {
+		if q.Get("from") != strconv.FormatInt(i.StartedAt.Add(-5*time.Minute).UnixMilli(), 10) || q.Get("to") != strconv.FormatInt(i.StartedAt.Add(5*time.Minute).UnixMilli(), 10) || q.Get("orgId") != "2" {
 			t.Fatal("incorrect incident window", q)
 		}
 		if b.IncidentSummary(i) != message {
@@ -41,7 +43,7 @@ func TestIncidentSummaryWithoutGrafana(t *testing.T) {
 	i := detector.Incident{ID: "123", Status: detector.Open, StartedAt: time.Now(), Findings: []detector.Finding{"query_age_regression"}}
 	for _, base := range []string{"", "https://%"} {
 		message := New("", "", base).IncidentSummary(i)
-		if strings.Contains(message, "Grafana:") || message != FormatIncident(i) {
+		if strings.Contains(message, "<a ") || message != html.EscapeString(FormatIncident(i)) {
 			t.Fatal("incorrect summary without a link", message)
 		}
 	}

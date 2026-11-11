@@ -11,10 +11,11 @@ import (
 // StatusSummary formats the collected state without accessing the database or detector.
 func StatusSummary(view state.View, pollInterval time.Duration, now time.Time) string {
 	var message strings.Builder
-	message.WriteString("Мониторинг PostgreSQL\n")
 	if view.Healthy && view.Latest != nil {
+		message.WriteString("🟢 Мониторинг PostgreSQL\n")
 		message.WriteString("Сбор: данные актуальны\n")
 	} else {
+		message.WriteString("🔴 Мониторинг PostgreSQL\n")
 		message.WriteString("Сбор недоступен или данные устарели\n")
 	}
 	if view.Latest == nil {
@@ -26,7 +27,7 @@ func StatusSummary(view state.View, pollInterval time.Duration, now time.Time) s
 		if age < 0 {
 			age = 0
 		}
-		fmt.Fprintf(&message, "Последний снимок: %s\nДавность снимка: %s\nИнтервал опроса: %s\n\n", snapshot.At.Format(time.RFC3339), age.Round(time.Second), pollInterval)
+		fmt.Fprintf(&message, "Последний снимок: %s\nДавность снимка: %s\nИнтервал опроса: %s\n\n", formatTime(snapshot.At), age.Round(time.Second), pollInterval)
 		if !view.Healthy {
 			message.WriteString("Последние известные данные\n")
 		}

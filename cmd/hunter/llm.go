@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -19,8 +20,9 @@ import (
 )
 
 const (
-	analysisGap     = 2 * time.Minute
-	telegramMaxText = 4000
+	analysisGap = 2 * time.Minute
+	// Reserve space for the 3000-unit incident and its Grafana link label.
+	telegramAnalysisText = 900
 )
 
 type llmLayer struct {
@@ -101,10 +103,7 @@ func (l *llmLayer) withAnalysis(text, incidentID string) string {
 		return text
 	}
 	if r, ok := l.results.ForIncident(incidentID); ok {
-		text += "\n\n" + telegram.FormatAnalysis(r)
-	}
-	if runes := []rune(text); len(runes) > telegramMaxText {
-		text = string(runes[:telegramMaxText-1]) + "…"
+		text += "\n\n" + html.EscapeString(telegram.LimitText(telegram.FormatAnalysis(r), telegramAnalysisText))
 	}
 	return text
 }

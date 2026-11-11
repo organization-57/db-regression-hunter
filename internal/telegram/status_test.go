@@ -17,9 +17,9 @@ func TestStatusSummaryFreshSnapshot(t *testing.T) {
 		Latest:    &collector.Snapshot{At: at, Active: 3, LockWaiters: 1, OldestQuerySeconds: 2.4},
 		Incidents: []detector.Incident{{ID: "older"}, {ID: "1794321188121986000"}},
 	}
-	want := `Мониторинг PostgreSQL
+	want := `🟢 Мониторинг PostgreSQL
 Сбор: данные актуальны
-Последний снимок: 2026-11-10T15:00:00Z
+Последний снимок: 10.11.2026 18:00:00 МСК
 Давность снимка: 5s
 Интервал опроса: 10s
 
@@ -50,6 +50,9 @@ func TestStatusSummaryUnavailableCollection(t *testing.T) {
 				store.Failed(nil)
 			}
 			got := StatusSummary(store.View(maxAge, true), 10*time.Second, at.Add(time.Minute))
+			if !strings.HasPrefix(got, "🔴 Мониторинг PostgreSQL\n") {
+				t.Fatal("missing stale indicator", got)
+			}
 			for _, part := range []string{"Сбор недоступен или данные устарели", "Последние известные данные", "Давность снимка: 1m0s", "Активных сессий: 7", "Ожидают блокировку Lock: 2", "12.35 с", "Сохранено расследований: 0", "Расследований пока нет"} {
 				if !strings.Contains(got, part) {
 					t.Fatalf("missing %q in %s", part, got)
@@ -63,7 +66,7 @@ func TestStatusSummaryUnavailableCollection(t *testing.T) {
 }
 
 func TestStatusSummaryBeforeFirstSnapshot(t *testing.T) {
-	want := "Мониторинг PostgreSQL\nСбор недоступен или данные устарели\nДанных пока нет\nИнтервал опроса: 10s\n\nСохранено расследований: 0\nРасследований пока нет"
+	want := "🔴 Мониторинг PostgreSQL\nСбор недоступен или данные устарели\nДанных пока нет\nИнтервал опроса: 10s\n\nСохранено расследований: 0\nРасследований пока нет"
 	if got := StatusSummary(state.View{}, 10*time.Second, time.Now()); got != want {
 		t.Fatalf("unknown metrics must not be displayed as zero:\n%s", got)
 	}
