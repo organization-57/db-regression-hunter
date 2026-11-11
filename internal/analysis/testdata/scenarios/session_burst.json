@@ -5,14 +5,16 @@
   "slow_query"
  ],
  "evidence": {
-  "schema": "hunter.evidence/v3",
+  "schema": "hunter.evidence/v4",
   "incidents": [
    {
     "id": "I1",
-    "incident_id": "1794410362257037000-active_sessions",
-    "finding": "active_sessions_surge",
+    "incident_id": "1794414595995335000-active_sessions",
+    "findings": [
+     "active_sessions_surge"
+    ],
     "status": "open",
-    "started_at": "2026-11-11T15:19:12.251611Z",
+    "started_at": "2026-11-11T16:29:45.996788Z",
     "metric": "active_sessions",
     "observed": 8,
     "baseline": 0,
@@ -21,25 +23,27 @@
    },
    {
     "id": "I2",
-    "incident_id": "1794410362257037000-oldest_query_seconds",
-    "finding": "query_age_regression",
+    "incident_id": "1794414595995335000-oldest_query_seconds",
+    "findings": [
+     "query_age_regression"
+    ],
     "status": "open",
-    "started_at": "2026-11-11T15:19:12.251611Z",
+    "started_at": "2026-11-11T16:29:45.996788Z",
     "metric": "oldest_query_seconds",
-    "observed": 12.1,
+    "observed": 12,
     "baseline": 0,
     "threshold": 1,
-    "peak": 42.1
+    "peak": 42
    }
   ],
   "baseline_window": {
-   "from": "2026-11-11T15:17:07.257253Z",
-   "to": "2026-11-11T15:19:07.25537Z",
-   "samples": 25
+   "from": "2026-11-11T16:25:00.99544Z",
+   "to": "2026-11-11T16:29:40.994054Z",
+   "samples": 30
   },
   "incident_window": {
-   "from": "2026-11-11T15:19:12.251611Z",
-   "to": "2026-11-11T15:19:52.256904Z",
+   "from": "2026-11-11T16:29:45.996788Z",
+   "to": "2026-11-11T16:30:25.998091Z",
    "samples": 9
   },
   "metrics": [
@@ -47,9 +51,9 @@
     "id": "M1",
     "name": "oldest_active_query_age",
     "unit": "s",
-    "incident_peak": 42.1,
+    "incident_peak": 42,
     "baseline": 0,
-    "incident": 22.1
+    "incident": 22
    },
    {
     "id": "M2",
@@ -71,8 +75,8 @@
     "id": "M4",
     "name": "commits_per_second",
     "unit": "tx/s",
-    "baseline": 15.7,
-    "incident": 15.6
+    "baseline": 15.6,
+    "incident": 16.1
    },
    {
     "id": "M5",
@@ -92,7 +96,7 @@
     "id": "M7",
     "name": "blocks_read_per_second",
     "unit": "blocks/s",
-    "baseline": 0.833,
+    "baseline": 0,
     "incident": 0
    },
    {
@@ -106,65 +110,58 @@
     "id": "M9",
     "name": "cache_hit_ratio",
     "unit": "%",
-    "baseline": 99.9,
+    "baseline": 100,
     "incident": 100
    }
   ],
   "long_running_sessions": [
    {
     "id": "S1",
-    "pid": 74,
+    "pid": 77,
     "application": "hunter-demo",
     "state": "active",
     "wait_event": "Timeout:PgSleep",
-    "query_age_seconds": 42.1,
-    "transaction_age_seconds": 42.1,
-    "query": "SELECT pg_sleep($1)",
-    "plan": "Result  (cost=0.00..0.01 rows=1 width=4)"
+    "query_age_seconds": 42,
+    "transaction_age_seconds": 42
    },
    {
     "id": "S2",
-    "pid": 75,
+    "pid": 73,
     "application": "hunter-demo",
     "state": "active",
     "wait_event": "Timeout:PgSleep",
-    "query_age_seconds": 42.1,
-    "transaction_age_seconds": 42.1,
-    "query": "SELECT pg_sleep($1)"
+    "query_age_seconds": 42,
+    "transaction_age_seconds": 42
    },
    {
     "id": "S3",
+    "pid": 268,
+    "application": "hunter-demo",
+    "state": "active",
+    "wait_event": "Timeout:PgSleep",
+    "query_age_seconds": 42,
+    "transaction_age_seconds": 42
+   },
+   {
+    "id": "S4",
     "pid": 71,
     "application": "hunter-demo",
     "state": "active",
     "wait_event": "Timeout:PgSleep",
-    "query_age_seconds": 42.1,
-    "transaction_age_seconds": 42.1,
-    "query": "SELECT pg_sleep($1)"
-   },
-   {
-    "id": "S4",
-    "pid": 72,
-    "application": "hunter-demo",
-    "state": "active",
-    "wait_event": "Timeout:PgSleep",
-    "query_age_seconds": 42.1,
-    "transaction_age_seconds": 42.1,
-    "query": "SELECT pg_sleep($1)"
+    "query_age_seconds": 42,
+    "transaction_age_seconds": 42
    },
    {
     "id": "S5",
-    "pid": 252,
+    "pid": 650,
     "application": "hunter-demo",
     "state": "active",
     "wait_event": "Timeout:PgSleep",
-    "query_age_seconds": 42.1,
-    "transaction_age_seconds": 42.1,
-    "query": "SELECT pg_sleep($1)"
+    "query_age_seconds": 42,
+    "transaction_age_seconds": 42
    }
   ],
   "sql_statistics": "ready",
-  "sql_text": "normalized: comments removed, every literal replaced with $n",
   "missing_sources": [
    "application metrics (request rate, errors, latency) are not connected",
    "host metrics (CPU, disk I/O) are not connected",

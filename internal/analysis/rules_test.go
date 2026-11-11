@@ -17,7 +17,7 @@ func signals(findings ...string) evidence.Package {
 		{ID: "M6", Name: "temp_bytes_per_second", Change: evidence.Change{Baseline: f(0), Incident: f(9e6)}},
 	}}
 	for n, finding := range findings {
-		p.Incidents = append(p.Incidents, evidence.Incident{ID: "I" + string(rune('1'+n)), IncidentID: finding, Finding: finding, Status: "open"})
+		p.Incidents = append(p.Incidents, evidence.Incident{ID: "I" + string(rune('1'+n)), IncidentID: finding, Findings: []string{finding}, Status: "open"})
 	}
 	return p
 }
@@ -34,9 +34,12 @@ func TestRulesExplainEachScenarioWithinTheContract(t *testing.T) {
 	busy.Metrics[3].Incident = f(40)
 	report := signals("query_age_regression")
 	report.Sessions = []evidence.Session{{ID: "S1", PID: 77, State: "active", WaitEvent: "Timeout:PgSleep", QueryAgeSeconds: 41}}
-	plan := signals("sql_execution_regression")
-	plan.Statements = []evidence.Statement{{ID: "Q1", QueryID: "-4812771253", MeanExecMS: evidence.Change{Baseline: f(0.6), Incident: f(30)},
-		SharedReadsPerCall: evidence.Change{Baseline: f(2), Incident: f(400)}}}
+	slowSQL := signals("sql_execution_regression")
+	slowSQL.Statements = []evidence.Statement{{ID: "Q1", QueryID: "-4812771253", MeanExecMS: evidence.Change{Baseline: f(0.6), Incident: f(30)},
+		CallsPerSecond: evidence.Change{Baseline: f(40), Incident: f(41)}, SharedReadsPerCall: 400}}
+	hotSQL := signals("sql_execution_regression")
+	hotSQL.Statements = []evidence.Statement{{ID: "Q1", QueryID: "-4812771253", MeanExecMS: evidence.Change{Baseline: f(0.6), Incident: f(3)},
+		CallsPerSecond: evidence.Change{Baseline: f(40), Incident: f(400)}}}
 	cases := []struct {
 		name     string
 		p        evidence.Package
@@ -51,7 +54,8 @@ func TestRulesExplainEachScenarioWithinTheContract(t *testing.T) {
 		{"session burst", surge, "connection_saturation", ""},
 		{"traffic", busy, "load_growth", ""},
 		{"slow report", report, "slow_query", ""},
-		{"plan change", plan, "plan_regression", ""},
+		{"slow statement", slowSQL, "slow_query", ""},
+		{"hot statement", hotSQL, "load_growth", ""},
 		{"nothing", signals("query_age_regression"), "unknown", ""},
 	}
 	for _, c := range cases {

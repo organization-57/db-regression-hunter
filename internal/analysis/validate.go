@@ -165,7 +165,7 @@ func contradiction(c Cause, p evidence.Package) string {
 	}
 	finding := func(name string) bool {
 		for _, i := range p.Incidents {
-			if i.Finding == name {
+			if contains(i.Findings, name) {
 				return true
 			}
 		}

@@ -2,6 +2,8 @@ package telegram
 
 import (
 	"fmt"
+	"math"
+	"slices"
 	"strings"
 
 	"github.com/makeev/db-regression-hunter/internal/analysis"
@@ -17,7 +19,7 @@ var categoryNames = map[string]string{
 
 var findingNames = map[string]string{
 	"query_age_regression": "долгие запросы", "lock_wait": "ожидания блокировок", "lock_contention": "блокировки",
-	"active_sessions_surge": "всплеск сессий", "temp_file_growth": "временные файлы", "deadlock": "deadlock",
+	"active_sessions_surge": "всплеск сессий", "temp_file_growth": "временные файлы", "deadlock": "deadlock", "idle_in_transaction": "транзакция простаивает",
 	"sql_execution_regression": "замедление SQL",
 }
 
@@ -65,7 +67,7 @@ func fact(p *evidence.Package, id string) string {
 	}
 	for _, i := range p.Incidents {
 		if i.ID == id {
-			return fmt.Sprintf("сигнал %s: %g при пороге %g", i.Finding, i.Peak, i.Threshold)
+			return fmt.Sprintf("сигнал %s: %g при пороге %g", strings.Join(i.Findings, ", "), i.Peak, i.Threshold)
 		}
 	}
 	for _, m := range p.Metrics {
@@ -84,7 +86,12 @@ func fact(p *evidence.Package, id string) string {
 	}
 	for _, s := range p.Sessions {
 		if s.ID == id {
-			return fmt.Sprintf("PID %d (%s, %s) выполняется %g с%s", s.PID, s.Application, s.WaitEvent, s.QueryAgeSeconds, query(s.Query))
+			return fmt.Sprintf("PID %d (%s, %s) выполняется %g с", s.PID, s.Application, s.WaitEvent, s.QueryAgeSeconds)
+		}
+	}
+	for _, t := range p.Tables {
+		if t.ID == id {
+			return fmt.Sprintf("таблица %s: около %g строк, %g МБ, мёртвых строк %g", t.Name, t.EstimatedRows, math.Round(t.TotalBytes/1e5)/10, t.DeadTuples)
 		}
 	}
 	for _, s := range p.Statements {
@@ -107,11 +114,15 @@ func FormatAnalysis(r analysis.Result) string {
 	var signals []string
 	if r.Evidence != nil {
 		for _, i := range r.Evidence.Incidents {
-			name := findingNames[i.Finding]
-			if name == "" {
-				name = i.Finding
+			for _, f := range i.Findings {
+				name := findingNames[f]
+				if name == "" {
+					name = f
+				}
+				if !slices.Contains(signals, name) {
+					signals = append(signals, name)
+				}
 			}
-			signals = append(signals, name)
 		}
 	}
 	var b strings.Builder

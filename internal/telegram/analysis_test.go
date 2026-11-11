@@ -15,7 +15,7 @@ func TestFormatAnalysisShowsFactsInsteadOfIDs(t *testing.T) {
 		Locks: []evidence.Lock{{ID: "L1", BlockingPID: 4127, BlockingApplication: "shop", BlockingState: "idle in transaction", TransactionAgeSeconds: 34, BlockedTotal: 7,
 			BlockingQuery: "UPDATE demo_shop.inventory SET updated_at=now() WHERE product_id=$1"}},
 	}
-	p.Incidents = []evidence.Incident{{ID: "I1", Finding: "lock_contention"}, {ID: "I2", Finding: "sql_execution_regression"}}
+	p.Incidents = []evidence.Incident{{ID: "I1", Findings: []string{"lock_contention", "idle_in_transaction"}}, {ID: "I2", Findings: []string{"sql_execution_regression"}}}
 	r := analysis.Result{Status: analysis.Done, Model: "deepseek-ai/DeepSeek-V4-Flash-0731", LatencyMs: 21000, IncidentIDs: []string{"a", "b"}, Evidence: p,
 		Analysis: &analysis.Analysis{
 			Summary:         "PID 4127 держит строку.",
@@ -24,7 +24,7 @@ func TestFormatAnalysisShowsFactsInsteadOfIDs(t *testing.T) {
 			Assumptions:     []string{"транзакцию забыло закрыть приложение"},
 		}}
 	text := FormatAnalysis(r)
-	for _, want := range []string{"сигналы: блокировки, замедление SQL", "Предположения, не подтверждённые данными: транзакцию забыло закрыть приложение", "долгая транзакция (уверенность высокая)", "• PID 4127 (shop, idle in transaction, транзакция 34 с) блокирует 7; запрос: UPDATE demo_shop.inventory SET updated_at=now() WHERE product_id=$1",
+	for _, want := range []string{"сигналы: блокировки, транзакция простаивает, замедление SQL", "Предположения, не подтверждённые данными: транзакцию забыло закрыть приложение", "долгая транзакция (уверенность высокая)", "• PID 4127 (shop, idle in transaction, транзакция 34 с) блокирует 7; запрос: UPDATE demo_shop.inventory SET updated_at=now() WHERE product_id=$1",
 		"• ожидают блокировку: 0 → 6", "[сейчас, нужно подтверждение]", "DeepSeek-V4-Flash-0731 · 21 с"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q in:\n%s", want, text)

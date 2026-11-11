@@ -1,6 +1,7 @@
 package detector
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -59,14 +60,25 @@ func TestSQLIncidentUsesNewModelAndSeparateRecoverySetting(t *testing.T) {
 	}
 	updates, _ := f.tick(5, 10)
 	opened := sqlIncident(updates, "0")
-	if opened == nil || opened.Status != Open || !opened.Notify || opened.Finding != FindingSQLExecutionRegression || opened.Trigger.Metric != "sql_mean_exec_ms" || opened.Trigger.Baseline != 1 || opened.Trigger.Threshold != 6 || opened.Recovery.RequiredSamples != 3 {
+	if opened == nil || opened.Status != Open || !opened.Notify || !opened.HasFinding(FindingSQLExecutionRegression) || opened.Trigger.Metric != "sql_mean_exec_ms" || opened.Trigger.Baseline != 1 || opened.Trigger.Threshold != 6 || opened.Recovery.RequiredSamples != 3 {
 		t.Fatalf("bad SQL opening: %+v", opened)
 	}
-	if opened.SQLContext == nil || len(opened.SQLContext.Before) == 0 || len(opened.SQLContext.During) < 2 {
-		t.Fatal("missing before/during SQL context")
-	}
+
+	collections := 0
+	f.d.EnrichQueries(updates, func(targets []collector.QueryTarget) collector.QueryBatch {
+		collections++
+		if len(targets) != 1 || targets[0].Statement == nil || targets[0].Statement.QueryID != "0" {
+			t.Fatal("wrong query selected")
+		}
+		return collector.QueryBatch{Details: []json.RawMessage{json.RawMessage(`{"sql":"select 1"}`)}}
+	})
+	opened.Queries[0].Details[8] = 'X'
 	first := CloneIncident(*opened)
 	updates, _ = f.tick(5, 1)
+	f.d.EnrichQueries(updates, func([]collector.QueryTarget) collector.QueryBatch { collections++; return collector.QueryBatch{} })
+	if i := sqlIncident(updates, "0"); collections != 1 || string(i.Queries[0].Details) != `{"sql":"select 1"}` {
+		t.Fatal("details were recollected or shared with caller")
+	}
 	if i := sqlIncident(updates, "0"); i.Status != Recovering || i.Notify || i.Recovery.NormalSamples != 1 {
 		t.Fatal("first recovery", i)
 	}
@@ -79,7 +91,7 @@ func TestSQLIncidentUsesNewModelAndSeparateRecoverySetting(t *testing.T) {
 	if closed.Status != Resolved || !closed.Notify || closed.ID != opened.ID || closed.ResolvedAt == nil {
 		t.Fatal("recovery failed", closed)
 	}
-	if first.SQLRegression.Status != "active" || first.SQLRegression.Current.Comparison.BaselineMeanExecMS != 1 {
+	if first.SQLRegression.Status != "active" || first.Trigger.Baseline != 1 {
 		t.Fatal("later updates changed initial evidence")
 	}
 }
@@ -122,7 +134,7 @@ func TestSQLParallelEpisodesAndExistingDeadlockSignalStayIndependent(t *testing.
 	updates, _ := f.tick(5, 10, 10)
 	a, b := sqlIncident(updates, "0"), sqlIncident(updates, "1")
 	dead := incidentFor(updates, "deadlocks_delta")
-	if a == nil || b == nil || a.ID == b.ID || dead == nil || dead.Finding != FindingDeadlock {
+	if a == nil || b == nil || a.ID == b.ID || dead == nil || !dead.HasFinding(FindingDeadlock) {
 		t.Fatal("SQL damaged parallel signals", updates)
 	}
 	for range 3 {
@@ -139,21 +151,18 @@ func TestSQLParallelEpisodesAndExistingDeadlockSignalStayIndependent(t *testing.
 	}
 }
 
-func TestSQLIncidentsAreNotLimitedByPresentationTop(t *testing.T) {
+func TestAllSQLIncidentsAreDelivered(t *testing.T) {
 	f := newSQLFixture(25)
 	f.tick(5, 10)
 	updates, report := f.tick(5, 10)
-	if len(report.Regressions) != 20 || len(report.Episodes) != 25 || report.ActiveRegressions != 25 || len(updates) != 25 {
-		t.Fatal("presentation cap suppressed incidents", len(updates), report.ActiveRegressions)
+	if len(report.Queries) != 25 || len(report.Episodes) != 25 || report.ActiveRegressions != 25 || len(updates) != 25 {
+		t.Fatal("lost SQL incidents", len(updates), report.ActiveRegressions)
 	}
 	ids := map[string]bool{}
 	for _, i := range updates {
-		if i.Finding != FindingSQLExecutionRegression || !i.Notify || ids[i.ID] {
+		if !i.HasFinding(FindingSQLExecutionRegression) || !i.Notify || ids[i.ID] {
 			t.Fatal("duplicate/invalid SQL incident", i)
 		}
 		ids[i.ID] = true
-		if len(i.SQLContext.During[len(i.SQLContext.During)-1].Episodes) != 0 {
-			t.Fatal("retained full raw episode list in context")
-		}
 	}
 }

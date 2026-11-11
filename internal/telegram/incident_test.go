@@ -15,8 +15,8 @@ func TestIncidentSummaryWindow(t *testing.T) {
 	b := New("", "", "https://grafana.test/d/hunter?orgId=2")
 	// The formatter must work for arbitrary incidents, including a future ID lookup.
 	for _, i := range []detector.Incident{
-		{ID: "first", Status: detector.Open, StartedAt: started, DetectedAt: started.Add(20 * time.Second), Finding: "lock_contention"},
-		{ID: "second", Status: detector.Resolved, StartedAt: started.Add(-time.Hour), DetectedAt: started.Add(-30 * time.Minute), Finding: "query_age_regression"},
+		{ID: "first", Status: detector.Open, StartedAt: started, DetectedAt: started.Add(20 * time.Second), Findings: []detector.Finding{"lock_contention"}},
+		{ID: "second", Status: detector.Resolved, StartedAt: started.Add(-time.Hour), DetectedAt: started.Add(-30 * time.Minute), Findings: []detector.Finding{"query_age_regression"}},
 	} {
 		message := b.IncidentSummary(i)
 		prefix := FormatIncident(i) + "\n\nGrafana: "
@@ -38,7 +38,7 @@ func TestIncidentSummaryWindow(t *testing.T) {
 }
 
 func TestIncidentSummaryWithoutGrafana(t *testing.T) {
-	i := detector.Incident{ID: "123", Status: detector.Open, StartedAt: time.Now(), Finding: "query_age_regression"}
+	i := detector.Incident{ID: "123", Status: detector.Open, StartedAt: time.Now(), Findings: []detector.Finding{"query_age_regression"}}
 	for _, base := range []string{"", "https://%"} {
 		message := New("", "", base).IncidentSummary(i)
 		if strings.Contains(message, "Grafana:") || message != FormatIncident(i) {

@@ -1,7 +1,6 @@
 package evidence
 
 import (
-	"context"
 	"fmt"
 	"math"
 	"sort"
@@ -11,35 +10,35 @@ import (
 	"github.com/makeev/db-regression-hunter/internal/collector"
 	"github.com/makeev/db-regression-hunter/internal/detector"
 	"github.com/makeev/db-regression-hunter/internal/sqlstats"
-	"github.com/makeev/db-regression-hunter/internal/sqltext"
 )
 
 const (
-	Schema          = "hunter.evidence/v3"
+	Schema          = "hunter.evidence/v4"
 	baselineSamples = 30
 	maxLocks        = 8
 	maxStatements   = 5
 	maxSessions     = 5
-	maxPlans        = 4
 	maxIncidents    = 8
 	maxText         = 64
 	maxStep         = time.Minute
 )
 
 type Package struct {
-	Schema            string      `json:"schema"`
-	Incidents         []Incident  `json:"incidents"`
-	BaselineWindow    Window      `json:"baseline_window"`
-	IncidentWindow    Window      `json:"incident_window"`
-	Metrics           []Metric    `json:"metrics"`
-	Locks             []Lock      `json:"locks,omitempty"`
-	LockGraphComplete *bool       `json:"lock_graph_complete,omitempty"`
-	LockGraphCurrent  bool        `json:"lock_graph_current,omitempty"`
-	Statements        []Statement `json:"regressed_statements,omitempty"`
-	Sessions          []Session   `json:"long_running_sessions,omitempty"`
-	SQLStatistics     string      `json:"sql_statistics"`
-	SQLText           string      `json:"sql_text"`
-	MissingSources    []string    `json:"missing_sources"`
+	Schema            string            `json:"schema"`
+	Incidents         []Incident        `json:"incidents"`
+	BaselineWindow    Window            `json:"baseline_window"`
+	IncidentWindow    Window            `json:"incident_window"`
+	Metrics           []Metric          `json:"metrics"`
+	Locks             []Lock            `json:"locks,omitempty"`
+	LockGraphComplete *bool             `json:"lock_graph_complete,omitempty"`
+	LockGraphCurrent  bool              `json:"lock_graph_current,omitempty"`
+	Statements        []Statement       `json:"regressed_statements,omitempty"`
+	Sessions          []Session         `json:"long_running_sessions,omitempty"`
+	Tables            []Table           `json:"tables,omitempty"`
+	Settings          map[string]string `json:"settings,omitempty"`
+	SQLNames          string            `json:"sql_names,omitempty"`
+	SQLStatistics     string            `json:"sql_statistics"`
+	MissingSources    []string          `json:"missing_sources"`
 }
 
 type Window struct {
@@ -51,7 +50,7 @@ type Window struct {
 type Incident struct {
 	ID              string    `json:"id"`
 	IncidentID      string    `json:"incident_id"`
-	Finding         string    `json:"finding"`
+	Findings        []string  `json:"findings"`
 	Status          string    `json:"status"`
 	StartedAt       time.Time `json:"started_at"`
 	Metric          string    `json:"metric"`
@@ -84,6 +83,9 @@ type Lock struct {
 	BlockingState         string   `json:"blocking_state"`
 	BlockingWaitEvent     string   `json:"blocking_wait_event,omitempty"`
 	BlockingQuery         string   `json:"blocking_last_query,omitempty"`
+	QuerySource           string   `json:"blocking_query_source,omitempty"`
+	HeldLocks             []string `json:"blocking_held_locks,omitempty"`
+	NamesFrom             string   `json:"names_from,omitempty"`
 	TransactionAgeSeconds float64  `json:"blocking_transaction_age_seconds"`
 	BlockedPIDs           []int    `json:"blocked_pids"`
 	BlockedTotal          int      `json:"blocked_total_through_chain"`
@@ -99,22 +101,21 @@ type Session struct {
 	WaitEvent       string  `json:"wait_event,omitempty"`
 	QueryAgeSeconds float64 `json:"query_age_seconds"`
 	TransactionAge  float64 `json:"transaction_age_seconds"`
-	Query           string  `json:"query,omitempty"`
-	Plan            string  `json:"plan,omitempty"`
 }
 
 type Statement struct {
-	ID                 string `json:"id"`
-	QueryID            string `json:"queryid"`
-	Status             string `json:"status"`
-	MeanExecMS         Change `json:"mean_exec_ms"`
-	CallsPerSecond     Change `json:"calls_per_second"`
-	SharedReadsPerCall Change `json:"shared_reads_per_call"`
-	TempWritesPerCall  Change `json:"temp_writes_per_call"`
-	RowsPerCall        Change `json:"rows_per_call"`
-	LoadIncreased      bool   `json:"load_increased"`
-	Query              string `json:"query,omitempty"`
-	Plan               string `json:"plan,omitempty"`
+	ID                 string  `json:"id"`
+	QueryID            string  `json:"queryid"`
+	Status             string  `json:"status"`
+	MeanExecMS         Change  `json:"mean_exec_ms"`
+	CallsPerSecond     Change  `json:"calls_per_second"`
+	SharedReadsPerCall float64 `json:"shared_reads_per_call"`
+	SharedHitsPerCall  float64 `json:"shared_hits_per_call"`
+	TempWritesPerCall  float64 `json:"temp_writes_per_call"`
+	RowsPerCall        float64 `json:"rows_per_call"`
+	Query              string  `json:"query,omitempty"`
+	Plan               string  `json:"plan,omitempty"`
+	NamesFrom          string  `json:"names_from,omitempty"`
 }
 
 type History struct {
@@ -136,16 +137,26 @@ func (h *History) Add(s collector.Snapshot, duringIncident bool) {
 }
 
 var findingOrder = map[detector.Finding]int{
-	detector.FindingLockContention: 0, detector.FindingLockWait: 1, detector.FindingDeadlock: 2, detector.FindingTempFileGrowth: 3,
-	detector.FindingActiveSessionsSurge: 4, detector.FindingQueryAgeRegression: 5, detector.FindingSQLExecutionRegression: 6,
+	detector.FindingLockContention: 0, detector.FindingIdleInTransaction: 0, detector.FindingLockWait: 1, detector.FindingDeadlock: 2,
+	detector.FindingTempFileGrowth: 3, detector.FindingActiveSessionsSurge: 4, detector.FindingQueryAgeRegression: 5, detector.FindingSQLExecutionRegression: 6,
+}
+
+func rank(i detector.Incident) int {
+	best := len(findingOrder)
+	for _, f := range i.Findings {
+		if r, ok := findingOrder[f]; ok && r < best {
+			best = r
+		}
+	}
+	return best
 }
 
 func Build(incidents []detector.Incident, h *History, current collector.Snapshot) Package {
-	p := Package{Schema: Schema, SQLText: "not collected", MissingSources: []string{}}
+	p := Package{Schema: Schema, MissingSources: []string{}}
 	incidents = append([]detector.Incident{}, incidents...)
 	sort.SliceStable(incidents, func(a, b int) bool {
-		if findingOrder[incidents[a].Finding] != findingOrder[incidents[b].Finding] {
-			return findingOrder[incidents[a].Finding] < findingOrder[incidents[b].Finding]
+		if rank(incidents[a]) != rank(incidents[b]) {
+			return rank(incidents[a]) < rank(incidents[b])
 		}
 		return incidents[a].StartedAt.Before(incidents[b].StartedAt)
 	})
@@ -174,11 +185,14 @@ func Build(incidents []detector.Incident, h *History, current collector.Snapshot
 	var stale *detector.Incident
 	for n, i := range incidents {
 		gaps += i.DataGaps
-		e := Incident{ID: fmt.Sprintf("I%d", len(p.Incidents)+1), IncidentID: i.ID, Finding: string(i.Finding), Status: i.Status, StartedAt: i.StartedAt,
+		e := Incident{ID: fmt.Sprintf("I%d", len(p.Incidents)+1), IncidentID: i.ID, Status: i.Status, StartedAt: i.StartedAt,
 			Metric: i.Trigger.Metric, Observed: value(i.Trigger.Observed), Baseline: value(i.Trigger.Baseline), Threshold: value(i.Trigger.Threshold),
 			Peak: value(i.Peak), IntervalSeconds: value(i.Trigger.IntervalSeconds)}
+		for _, f := range i.Findings {
+			e.Findings = append(e.Findings, string(f))
+		}
 		if i.SQLRegression != nil && len(p.Statements) < maxStatements {
-			e.Statement = p.addStatement(i)
+			e.Statement = p.addStatement(i, e.ID)
 		}
 		p.Incidents = append(p.Incidents, e)
 		if stale == nil && i.BlockingGraph != nil {
@@ -191,6 +205,7 @@ func Build(incidents []detector.Incident, h *History, current collector.Snapshot
 	case stale != nil:
 		p.addLocks(stale.BlockingGraph, false)
 	}
+	p.addQueryContext(incidents)
 	p.SQLStatistics = sqlStatus(current.SQL)
 	p.addMissing(len(before.snaps), gaps)
 	return p
@@ -347,42 +362,21 @@ func value(v float64) float64 {
 	return 0
 }
 
-func (p *Package) addStatement(i detector.Incident) string {
+func (p *Package) addStatement(i detector.Incident, incident string) string {
 	r := i.SQLRegression
-	q, c := r.Current, r.Current.Comparison
-	reads, temp, rows := beforePerCall(i)
-	s := Statement{ID: fmt.Sprintf("Q%d", len(p.Statements)+1), QueryID: q.QueryID, Status: r.Status, LoadIncreased: c.LoadIncreased,
-		MeanExecMS:         Change{round(c.BaselineMeanExecMS), round(q.MeanExecMS)},
-		CallsPerSecond:     Change{round(c.BaselineCallsPerSecond), round(q.CallsPerSecond)},
-		SharedReadsPerCall: Change{reads, round(q.SharedReadsPerCall)},
-		TempWritesPerCall:  Change{temp, round(q.TempWritesPerCall)},
-		RowsPerCall:        Change{rows, round(q.RowsPerCall)},
+	s := Statement{ID: fmt.Sprintf("Q%d", len(p.Statements)+1), QueryID: r.QueryID, Status: r.Status,
+		MeanExecMS:         Change{round(i.Trigger.Baseline), round(r.MeanExecMS)},
+		CallsPerSecond:     Change{round(r.BaselineCallsPerSecond), round(r.CallsPerSecond)},
+		SharedReadsPerCall: value(r.SharedReadsPerCall), SharedHitsPerCall: value(r.SharedHitsPerCall),
+		TempWritesPerCall: value(r.TempWritesPerCall), RowsPerCall: value(r.RowsPerCall),
+	}
+	for _, q := range i.Queries {
+		if d, ok := parseDetails(q); ok && q.Role == "regressed" {
+			s.Query, s.Plan, s.NamesFrom = clip(d.SQL), planText(d.Plan), incident
+		}
 	}
 	p.Statements = append(p.Statements, s)
 	return s.ID
-}
-
-func beforePerCall(i detector.Incident) (reads, temp, rows *float64) {
-	if i.SQLContext == nil {
-		return nil, nil, nil
-	}
-	var calls, sumReads, sumTemp, sumRows float64
-	for _, report := range i.SQLContext.Before {
-		for _, q := range report.Top {
-			if q.Identity != i.SQLRegression.Identity {
-				continue
-			}
-			n := float64(q.Calls)
-			calls += n
-			sumReads += q.SharedReadsPerCall * n
-			sumTemp += q.TempWritesPerCall * n
-			sumRows += q.RowsPerCall * n
-		}
-	}
-	if calls == 0 {
-		return nil, nil, nil
-	}
-	return round(sumReads / calls), round(sumTemp / calls), round(sumRows / calls)
 }
 
 func (p *Package) addLocks(g *collector.BlockingGraph, current bool) {
@@ -507,104 +501,23 @@ func (p Package) IDs() map[string]bool {
 	for _, s := range p.Sessions {
 		ids[s.ID] = true
 	}
+	for _, t := range p.Tables {
+		ids[t.ID] = true
+	}
 	return ids
 }
 
-type Source interface {
-	Activity(ctx context.Context, pids []int) ([]collector.Activity, error)
-	StatementTexts(ctx context.Context, queryIDs []string) (map[string]string, error)
-	Plan(ctx context.Context, query string) (string, error)
-}
-
-func (p *Package) Enrich(ctx context.Context, src Source, withText bool) {
-	var pids []int
-	for _, l := range p.Locks {
-		pids = append(pids, l.BlockingPID)
-	}
-	activity, err := src.Activity(ctx, pids)
-	if err != nil {
-		p.MissingSources = append(p.MissingSources, "sessions at analysis time are unavailable")
-	}
-	p.addSessions(activity, withText)
-	if !withText {
-		p.SQLText = "disabled"
-		p.MissingSources = append(p.MissingSources, "SQL texts and plans are disabled by configuration; statements are identified only by queryid")
-		return
-	}
-	p.SQLText = "normalized: comments removed, every literal replaced with $n"
-	for n := range p.Locks {
-		for _, a := range activity {
-			if a.PID == p.Locks[n].BlockingPID {
-				p.Locks[n].BlockingQuery = a.Query
-			}
+func (p *Package) AddSessions(sessions []collector.Session) {
+	for _, s := range sessions {
+		if len(p.Sessions) == maxSessions {
+			return
 		}
-	}
-	if len(p.Statements) > 0 {
-		var ids []string
-		for _, s := range p.Statements {
-			ids = append(ids, s.QueryID)
+		e := Session{ID: fmt.Sprintf("S%d", len(p.Sessions)+1), PID: s.PID, Application: Clean(s.Application), State: Clean(s.State),
+			QueryAgeSeconds: value(s.QueryAgeSeconds), TransactionAge: value(s.TransactionAgeSeconds)}
+		if s.WaitEventType != "" {
+			e.WaitEvent = Clean(s.WaitEventType + ":" + s.WaitEvent)
 		}
-		texts, err := src.StatementTexts(ctx, ids)
-		if err != nil {
-			p.MissingSources = append(p.MissingSources, "texts of regressed statements are unavailable")
-		}
-		for n := range p.Statements {
-			p.Statements[n].Query = texts[p.Statements[n].QueryID]
-		}
-	}
-	p.addPlans(ctx, src)
-}
-
-func (p *Package) addSessions(activity []collector.Activity, withText bool) {
-	var active []collector.Activity
-	for _, a := range activity {
-		if a.State == "active" {
-			active = append(active, a)
-		}
-	}
-	sort.SliceStable(active, func(x, y int) bool { return active[x].QueryAgeSeconds > active[y].QueryAgeSeconds })
-	for _, a := range active[:min(len(active), maxSessions)] {
-		s := Session{ID: fmt.Sprintf("S%d", len(p.Sessions)+1), PID: a.PID, Application: Clean(a.Application), State: Clean(a.State),
-			QueryAgeSeconds: value(a.QueryAgeSeconds), TransactionAge: value(a.TransactionAgeSeconds)}
-		if a.WaitEventType != "" {
-			s.WaitEvent = Clean(a.WaitEventType + ":" + a.WaitEvent)
-		}
-		if withText {
-			s.Query = a.Query
-		}
-		p.Sessions = append(p.Sessions, s)
-	}
-}
-
-func (p *Package) addPlans(ctx context.Context, src Source) {
-	seen := map[string]bool{}
-	failed := map[string][]string{}
-	budget := maxPlans
-	plan := func(id, query string) string {
-		if seen[query] || budget == 0 || !sqltext.Explainable(query) {
-			return ""
-		}
-		seen[query] = true
-		budget--
-		text, err := src.Plan(ctx, query)
-		if err != nil {
-			failed[err.Error()] = append(failed[err.Error()], id)
-		}
-		return text
-	}
-	for n := range p.Statements {
-		p.Statements[n].Plan = plan(p.Statements[n].ID, p.Statements[n].Query)
-	}
-	for n := range p.Sessions {
-		p.Sessions[n].Plan = plan(p.Sessions[n].ID, p.Sessions[n].Query)
-	}
-	reasons := make([]string, 0, len(failed))
-	for reason := range failed {
-		reasons = append(reasons, reason)
-	}
-	sort.Strings(reasons)
-	for _, reason := range reasons {
-		p.MissingSources = append(p.MissingSources, fmt.Sprintf("plan for %s is unavailable: %s", strings.Join(failed[reason], ", "), reason))
+		p.Sessions = append(p.Sessions, e)
 	}
 }
 

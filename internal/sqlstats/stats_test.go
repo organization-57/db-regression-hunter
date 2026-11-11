@@ -1,7 +1,6 @@
 package sqlstats
 
 import (
-	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -24,7 +23,7 @@ func next(s Snapshot) Snapshot {
 func TestIntervalUsesDeltasAndDistinguishesLoadFromExecutionCost(t *testing.T) {
 	tracker := &Tracker{}
 	first := fixture()
-	if r := tracker.Observe(first); r.Status != "warming_up" || len(r.Top) != 0 {
+	if r := tracker.Observe(first); r.Status != "warming_up" || len(r.Queries) != 0 {
 		t.Fatal(r)
 	}
 	second := next(first)
@@ -37,10 +36,10 @@ func TestIntervalUsesDeltasAndDistinguishesLoadFromExecutionCost(t *testing.T) {
 	c.TempWrites += 20
 	c.Rows += 50
 	r := tracker.Observe(second)
-	if r.Status != "ready" || len(r.Top) != 1 || r.IntervalSeconds != 10 {
+	if r.Status != "ready" || len(r.Queries) != 1 || r.IntervalSeconds != 10 {
 		t.Fatalf("bad interval: %+v", r)
 	}
-	q := r.Top[0]
+	q := r.Queries[0]
 	if q.Calls != 10 || q.CallsPerSecond != 1 || q.MeanExecMS != 20 || q.SharedReadsPerCall != 3 || q.SharedHitsPerCall != 4 || q.TempReadsPerCall != .5 || q.TempWritesPerCall != 2 || q.RowsPerCall != 5 {
 		t.Fatalf("bad deltas: %+v", q)
 	}
@@ -48,7 +47,7 @@ func TestIntervalUsesDeltasAndDistinguishesLoadFromExecutionCost(t *testing.T) {
 	third.Entries[0].Calls += 20
 	third.Entries[0].TotalExecMS += 400
 	r = tracker.Observe(third)
-	if r.Top[0].MeanExecMS != 20 || r.Top[0].CallsPerSecond != 2 {
+	if r.Queries[0].MeanExecMS != 20 || r.Queries[0].CallsPerSecond != 2 {
 		t.Fatal("higher traffic was confused with slower executions", r)
 	}
 }
@@ -79,7 +78,7 @@ func TestInvalidIntervalsRewarmInsteadOfCreatingSpikes(t *testing.T) {
 				want = "unavailable"
 			}
 			r := tracker.Observe(second)
-			if r.Status != want || len(r.Top) != 0 {
+			if r.Status != want || len(r.Queries) != 0 {
 				t.Fatalf("invalid delta escaped: %+v", r)
 			}
 			third := next(second)
@@ -93,7 +92,7 @@ func TestInvalidIntervalsRewarmInsteadOfCreatingSpikes(t *testing.T) {
 			third.Entries[0].Calls++
 			third.Entries[0].TotalExecMS += 5
 			r = tracker.Observe(third)
-			if r.Status != "ready" || len(r.Top) != 1 || r.Top[0].Calls != 1 || r.Top[0].MeanExecMS != 5 {
+			if r.Status != "ready" || len(r.Queries) != 1 || r.Queries[0].Calls != 1 || r.Queries[0].MeanExecMS != 5 {
 				t.Fatalf("did not resume with a fresh interval: %+v", r)
 			}
 		})
@@ -124,7 +123,7 @@ func TestEntryResetNewMissingAndIdle(t *testing.T) {
 				second.Entries[0].TotalExecMS = math.Inf(1)
 			}
 			r := tracker.Observe(second)
-			if r.ResetStatements != 1 || len(r.Top) != 0 {
+			if r.ResetStatements != 1 || len(r.Queries) != 0 {
 				t.Fatalf("reset produced a rate: %+v", r)
 			}
 		})
@@ -133,7 +132,7 @@ func TestEntryResetNewMissingAndIdle(t *testing.T) {
 	first := fixture()
 	tracker.Observe(first)
 	idle := next(first)
-	if r := tracker.Observe(idle); r.Status != "ready" || r.ActiveStatements != 0 || len(r.Top) != 0 {
+	if r := tracker.Observe(idle); r.Status != "ready" || r.ActiveStatements != 0 || len(r.Queries) != 0 {
 		t.Fatal("zero calls should not divide by zero", r)
 	}
 	missing := next(idle)
@@ -143,7 +142,7 @@ func TestEntryResetNewMissingAndIdle(t *testing.T) {
 	}
 	reappeared := next(missing)
 	reappeared.Entries = first.Entries
-	if r := tracker.Observe(reappeared); r.NewStatements != 1 || len(r.Top) != 0 {
+	if r := tracker.Observe(reappeared); r.NewStatements != 1 || len(r.Queries) != 0 {
 		t.Fatal("reappearing entry reused an old baseline", r)
 	}
 }
@@ -167,45 +166,7 @@ func TestIdentityPrecisionOwnershipAndTimestampOrder(t *testing.T) {
 	other.UserID++
 	second.Entries = append(second.Entries, other)
 	r := tracker.Observe(second)
-	if r.NewStatements != 1 || len(r.Top) != 1 || r.Top[0].Calls != 2 || r.Top[0].QueryID != "9223372036854775806" {
+	if r.NewStatements != 1 || len(r.Queries) != 1 || r.Queries[0].Calls != 2 || r.Queries[0].QueryID != "9223372036854775806" {
 		t.Fatalf("identity or baseline corrupted: %+v", r)
-	}
-}
-
-func TestRankByIntervalCostNotCumulativeLifetimeCost(t *testing.T) {
-	first := fixture()
-	first.Entries = nil
-	for n := range 25 {
-		first.Entries = append(first.Entries, Counters{Identity: Identity{QueryID: fmt.Sprint(n)}, Since: first.ResetAt, Calls: 100, TotalExecMS: float64(100000 - n*100)})
-	}
-	tracker := &Tracker{}
-	tracker.Observe(first)
-	second := next(first)
-	for n := range second.Entries {
-		second.Entries[n].Calls++
-		second.Entries[n].TotalExecMS += float64(n + 1)
-	}
-	r := tracker.Observe(second)
-	if r.ActiveStatements != 25 || len(r.Top) != TopLimit || r.Top[0].QueryID != "24" {
-		t.Fatalf("wrong ranking: %+v", r)
-	}
-}
-
-func TestContextHistoryBoundedAndIndependent(t *testing.T) {
-	var c Context
-	var recent []Report
-	for n := range 30 {
-		r := Report{Status: "ready", Top: []Query{{Calls: int64(n)}}}
-		c.Observe(r)
-		recent = AppendRecent(recent, r)
-		r.Top[0].Calls = -1
-	}
-	if len(c.During) != HistoryLimit || c.Dropped != 10 || c.During[0].Top[0].Calls != 0 || c.During[19].Top[0].Calls != 29 || recent[0].Top[0].Calls != 10 {
-		t.Fatal("history lost boundaries or shares buffers", c)
-	}
-	clone := c.Clone()
-	clone.During[0].Top[0].Calls = -1
-	if c.During[0].Top[0].Calls != 0 {
-		t.Fatal("cloned context shares query data")
 	}
 }

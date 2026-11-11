@@ -19,7 +19,6 @@ services:
       GONKA_API_KEY: ${GONKA_API_KEY:-}
       GONKA_MODELS: ${GONKA_MODELS:-}
       ANALYSIS_DELAY: ${ANALYSIS_DELAY:-}
-      ANALYSIS_SQL_TEXT: ${ANALYSIS_SQL_TEXT:-}
     ports: ["127.0.0.1:8080:8080"]
     depends_on:
       postgres:

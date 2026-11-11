@@ -21,21 +21,21 @@ func TestIncidentByID(t *testing.T) {
 			status = detector.Open
 		}
 		s.Update(collector.Snapshot{At: at}, &detector.Incident{
-			ID: strconv.Itoa(n), Status: status, Finding: detector.FindingLockContention,
+			ID: strconv.Itoa(n), Status: status, Findings: []detector.Finding{detector.FindingLockContention},
 			BlockingGraph: &collector.BlockingGraph{Nodes: []collector.Session{{PID: 33}}},
-			Blockers:      []detector.Blocker{{PID: 33, Chains: [][]int{{11, 33}}}},
+			Blockers:      []detector.Blocker{{PID: 33}},
 		})
 	}
 	s.Failed(nil)
 	for _, id := range []string{"1", "50", "100"} {
 		i, ok := s.IncidentByID(id)
-		if !ok || i.ID != id || i.Finding != "lock_contention" {
+		if !ok || i.ID != id || !i.HasFinding("lock_contention") {
 			t.Fatal("incorrect incident", i, ok)
 		}
 		i.BlockingGraph.Nodes[0].PID = 999
-		i.Blockers[0].Chains[0][0] = 999
+		i.Blockers[0].PID = 999
 		again, _ := s.IncidentByID(id)
-		if again.BlockingGraph.Nodes[0].PID != 33 || again.Blockers[0].Chains[0][0] != 11 {
+		if again.BlockingGraph.Nodes[0].PID != 33 || again.Blockers[0].PID != 33 {
 			t.Fatal("lookup exposes mutable store data")
 		}
 	}
@@ -57,7 +57,7 @@ func TestIncidentUpdatesAndCopies(t *testing.T) {
 	s := &Store{}
 	at := time.Now().UTC()
 	graph := &collector.BlockingGraph{At: at, Complete: true, Nodes: []collector.Session{{PID: 33}}}
-	i := &detector.Incident{ID: "episode", Status: detector.Open, BlockingGraph: graph, Blockers: []detector.Blocker{{PID: 33, Chains: [][]int{{11, 33}}}}}
+	i := &detector.Incident{ID: "episode", Status: detector.Open, BlockingGraph: graph, Blockers: []detector.Blocker{{PID: 33}}}
 	s.Update(collector.Snapshot{At: at, BlockingGraph: graph}, i)
 	i.Status = detector.Resolved
 	s.Update(collector.Snapshot{At: at}, i)
@@ -66,9 +66,9 @@ func TestIncidentUpdatesAndCopies(t *testing.T) {
 		t.Fatal("incident duplicated or not updated")
 	}
 	v.Incidents[0].BlockingGraph.Nodes[0].PID = 999
-	v.Incidents[0].Blockers[0].Chains[0][0] = 999
+	v.Incidents[0].Blockers[0].PID = 999
 	copy := s.View(time.Minute, true).Incidents[0]
-	if copy.BlockingGraph.Nodes[0].PID != 33 || copy.Blockers[0].Chains[0][0] != 11 {
+	if copy.BlockingGraph.Nodes[0].PID != 33 || copy.Blockers[0].PID != 33 {
 		t.Fatal("API result aliases retained evidence")
 	}
 	for n := 0; n < 101; n++ {

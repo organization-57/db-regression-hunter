@@ -1,89 +1,95 @@
 {
- "summary": "Сеанс PID 2284 (hunter-demo) находится в состоянии idle in transaction уже 41.8 секунды, удерживая блокировку строки в таблице demo_shop.inventory. Это блокирует сеанс PID 2283, который в свою очередь блокирует PID 263 — все трое выполняют обновление той же таблицы, что привело к пику времени запроса 41.1 секунды (I1).",
+ "summary": "Сессия PID 2185 (idle in transaction, 46.8 сек) удерживает RowExclusiveLock на id_1.id_2 и блокирует PID 2274, который в свою очередь блокирует PID 1878. Цепочка блокировок вызвала regression query_age с пиком 46 секунд и падение commits_per_second с 15.4 до 12.9.",
  "root_causes": [
   {
    "category": "long_transaction",
-   "title": "Idle-in-transaction сеанс удерживает блокировку строки",
-   "explanation": "PID 2284 находится в состоянии idle in transaction 41.8 секунды (L1), его последний запрос — UPDATE той же таблицы inventory, что и у двух других сеансов. Блокирует PID 2283, который ждёт Lock:transactionid (L2), а тот в свою очередь блокирует PID 263, ожидающего Lock:tuple. Пик времени запроса 41.1 с совпадает с возрастом транзакции PID 2284.",
+   "title": "Idle-in-transaction сессия удерживает блокировки слишком долго",
+   "explanation": "PID 2185 находится в состоянии idle in transaction 46.8 секунд, удерживая RowExclusiveLock на id_1.id_2 (L1). PID 2274 ожидает Lock:transactionid от PID 2185, а PID 1878 ожидает Lock:tuple от PID 2274 (L2). Это объясняет все инциденты: query_age_regression, lock_wait, lock_contention, idle_in_transaction.",
    "confidence": 0.95,
    "evidence": [
     "L1",
     "L2",
-    "S1",
-    "S2",
-    "M1"
+    "M1",
+    "M4"
    ]
   }
  ],
  "checks": [
   {
-   "step": "Проверить текущую длительность транзакции PID 2284",
-   "sql": "SELECT pid, state, query, state_change, now() - state_change AS transaction_age FROM pg_stat_activity WHERE pid = 2284;",
-   "expect": "state = 'idle in transaction', transaction_age > 40 секунд"
+   "step": "Проверить текущее состояние блокирующей сессии PID 2185",
+   "sql": "SELECT pid, state, query, query_start, state_change, clock_timestamp() - state_change AS idle_duration FROM pg_stat_activity WHERE pid = 2185;",
+   "expect": "state = 'idle in transaction', idle_duration > 40 секунд подтверждает зависание"
   },
   {
-   "step": "Уточнить цепочку блокировок в реальном времени",
-   "sql": "SELECT blocked_locks.pid AS blocked_pid, blocked_activity.query AS blocked_query, blocking_locks.pid AS blocking_pid, blocking_activity.query AS blocking_query FROM pg_catalog.pg_locks blocked_locks JOIN pg_catalog.pg_stat_activity blocked_activity ON blocked_activity.pid = blocked_locks.pid JOIN pg_catalog.pg_locks blocking_locks ON blocking_locks.locktype = blocked_locks.locktype AND blocking_locks.database IS NOT DISTINCT FROM blocked_locks.database AND blocking_locks.relation IS NOT DISTINCT FROM blocked_locks.relation AND blocking_locks.page IS NOT DISTINCT FROM blocked_locks.page AND blocking_locks.tuple IS NOT DISTINCT FROM blocked_locks.tuple AND blocking_locks.virtualxid IS NOT DISTINCT FROM blocked_locks.virtualxid AND blocking_locks.transactionid IS NOT DISTINCT FROM blocked_locks.transactionid AND blocking_locks.classid IS NOT DISTINCT FROM blocked_locks.classid AND blocking_locks.objid IS NOT DISTINCT FROM blocked_locks.objid AND blocking_locks.objsubid IS NOT DISTINCT FROM blocked_locks.objsubid AND blocking_locks.pid != blocked_locks.pid JOIN pg_catalog.pg_stat_activity blocking_activity ON blocking_activity.pid = blocking_locks.pid WHERE NOT blocked_locks.granted;",
-   "expect": "PID 2284 как blocker, PID 2283 и PID 263 как waiters"
+   "step": "Проверить текущую длину очереди блокировок",
+   "sql": "SELECT blocked_locks.pid AS blocked_pid, blocked_activity.query, blocked_activity.state, blocking_locks.pid AS blocking_pid, blocking_activity.query AS blocking_query FROM pg_catalog.pg_locks blocked_locks JOIN pg_catalog.pg_stat_activity blocked_activity ON blocked_locks.pid = blocked_activity.pid JOIN pg_catalog.pg_locks blocking_locks ON blocking_locks.locktype = blocked_locks.locktype AND blocking_locks.database IS NOT DISTINCT FROM blocked_locks.database AND blocking_locks.relation IS NOT DISTINCT FROM blocked_locks.relation AND blocking_locks.page IS NOT DISTINCT FROM blocked_locks.page AND blocking_locks.tuple IS NOT DISTINCT FROM blocked_locks.tuple AND blocking_locks.virtualxid IS NOT DISTINCT FROM blocked_locks.virtualxid AND blocking_locks.transactionid IS NOT DISTINCT FROM blocked_locks.transactionid AND blocking_locks.classid IS NOT DISTINCT FROM blocked_locks.classid AND blocking_locks.objid IS NOT DISTINCT FROM blocked_locks.objid AND blocking_locks.objsubid IS NOT DISTINCT FROM blocked_locks.objsubid AND blocking_locks.pid != blocked_locks.pid JOIN pg_catalog.pg_stat_activity blocking_activity ON blocking_locks.pid = blocking_activity.pid WHERE NOT blocked_locks.granted;",
+   "expect": "Блокирующая сессия всё ещё удерживает locks и блокирует waiter'ов"
   },
   {
-   "step": "Проверить, выполняется ли ещё UPDATE PID 2284",
-   "sql": "SELECT pid, query, now() - xact_start AS xact_age FROM pg_stat_activity WHERE application_name = 'hunter-demo' AND state IS DISTINCT FROM 'idle' ORDER BY xact_start;",
-   "expect": "Список активных транзакций того же приложения"
+   "step": "Проверить накопление dead tuples и время последнего analyze",
+   "sql": "SELECT relname, n_dead_tup, n_mod_since_analyze, last_analyze, last_autoanalyze FROM pg_stat_user_tables WHERE relname = 'id_2';",
+   "expect": "67 dead tuples и 6 модификаций с последнего analyze могут указывать на необходимость vacuum"
+  },
+  {
+   "step": "Проверить наличие долгих транзакций в idle состоянии",
+   "sql": "SELECT pid, state, state_change, clock_timestamp() - state_change AS idle_duration, query_start FROM pg_stat_activity WHERE state = 'idle in transaction' AND clock_timestamp() - state_change > interval '1 minute' ORDER BY idle_duration DESC;",
+   "expect": "Список всех idle-in-transaction сессий старше 1 минуты"
   }
  ],
  "recommendations": [
   {
-   "action": "Завершить idle-in-transaction сеанс PID 2284 командой pg_terminate_backend",
+   "action": "Терминировать PID 2185 (root blocker) для освобождения RowExclusiveLock",
    "priority": "now",
    "risk": "medium",
-   "sql": "SELECT pg_terminate_backend(2284);",
-   "verify": "Метрика M1 (oldest_active_query_age) должна вернуться к уровню базового периода < 1 с",
+   "sql": "SELECT pg_terminate_backend(2185);",
+   "verify": "M1 (oldest_active_query_age) должен вернуться к < 1 секунды, M3 (lock_waiting_sessions) к 0",
    "evidence": [
-    "L1",
-    "M1"
+    "L1"
    ],
    "requires_approval": true
   },
   {
-   "action": "После завершения PID 2284 проверить, разблокировались ли PID 2283 и PID 263",
+   "action": "Настроить idle_in_transaction_session_timeout для автоматического разрыва зависших транзакций",
    "priority": "next",
    "risk": "low",
-   "sql": "SELECT pid, state, wait_event, query_start FROM pg_stat_activity WHERE application_name = 'hunter-demo' ORDER BY query_start;",
-   "verify": "M3 (lock_waiting_sessions) должна снизиться до 0",
-   "evidence": null,
-   "requires_approval": false
-  },
-  {
-   "action": "Проанализировать код приложения hunter-demo: почему сеанс остаётся в idle in transaction",
-   "priority": "later",
-   "risk": "low",
-   "verify": "Повторение инцидента не должно происходить; M1 остаётся < 1 с",
+   "sql": "ALTER SYSTEM SET idle_in_transaction_session_timeout = '30s'; SELECT pg_reload_conf();",
+   "verify": "Новые idle-in-transaction сессии будут автоматически закрываться через 30 секунд",
    "evidence": [
     "L1"
    ],
-   "requires_approval": false
+   "requires_approval": true
   },
   {
-   "action": "Рассмотреть настройку idle_in_transaction_session_timeout для автоматического разрыва зависших транзакций",
-   "priority": "later",
-   "risk": "medium",
-   "sql": "ALTER SYSTEM SET idle_in_transaction_session_timeout = '30s'; SELECT pg_reload_conf();",
-   "verify": "Метрика M1 не должна превышать 30 с для idle in transaction сеансов",
+   "action": "Провести VACUUM ANALYZE на id_1.id_2 для очистки 67 мёртвых кортежей",
+   "priority": "next",
+   "risk": "low",
+   "sql": "VACUUM ANALYZE id_1.id_2;",
+   "verify": "T1 dead_tuples должен стать 0, last_analyze обновиться",
    "evidence": [
-    "L1"
+    "T1"
+   ],
+   "requires_approval": true
+  },
+  {
+   "action": "Рассмотреть увеличение work_mem (сейчас 4MB) для уменьшения временных файлов",
+   "priority": "later",
+   "risk": "low",
+   "sql": "ALTER SYSTEM SET work_mem = '16MB'; SELECT pg_reload_conf();",
+   "verify": "M8 (temp_bytes_per_second) должен снизиться при следующих сортировках/хешах",
+   "evidence": [
+    "M8"
    ],
    "requires_approval": true
   }
  ],
  "assumptions": [
-  "PID 2284 ожидает ввода от клиента (Client:ClientRead), что типично для кода, открывающего транзакцию, но не закрывающего её (например, забытый COMMIT).",
-  "Все три сеанса работают с одной и той же строкой (product_id=$1), что объясняет цепочку блокировок: PID 2284 удерживает блокировку строки, PID 2283 ждёт освобождения транзакции, PID 263 — ту же строку.",
-  "Приложение hunter-demo не обрабатывает ошибки блокировки и не выполняет повторные попытки, поэтому сеансы остаются заблокированными."
+  "PID 2185 завис из-за разрыва сетевого соединения или зависшего клиентского приложения, а не из-за намеренного долгого выполнения транзакции",
+  "Приложение hunter-demo повторно использует соединения, поэтому terminate PID 2185 не приведёт к потере клиентских сессий",
+  "Цепочка блокировок полностью раскрыта в lock_graph_current = true"
  ],
  "missing_data": [
-  "Точное значение product_id ($1) и содержимое строки inventory, чтобы подтвердить, что все три сеанса конкурируют за одну и ту же строку.",
-  "Логи приложения hunter-demo, показывающие, что именно делал клиент в момент, когда PID 2284 перешёл в idle in transaction.",
-  "Метрики хоста (CPU, дисковый I/O) и метрики запросов приложения (частота запросов, ошибки, задержка), которые могли бы показать, было ли изменение нагрузки или развёртывания."
+  "SQL context инцидента недоступен (explain_unavailable) — нельзя увидеть план запроса и понять причину долгого выполнения",
+  "Метрики приложения (request rate, errors, latency) не подключены — нельзя оценить влияние на пользователей",
+  "Метрики хоста (CPU, disk I/O) не подключены — нельзя исключить аппаратные проблемы"
  ]
 }

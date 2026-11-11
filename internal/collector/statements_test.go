@@ -82,9 +82,9 @@ func TestStatementsPostgresIntegration(t *testing.T) {
 	execute(6)
 	report := tracker.Observe(collect())
 	find := func(r sqlstats.Report) *sqlstats.Query {
-		for n := range r.Top {
-			if r.Top[n].Identity == id {
-				return &r.Top[n]
+		for n := range r.Queries {
+			if r.Queries[n].Identity == id {
+				return &r.Queries[n]
 			}
 		}
 		return nil
@@ -144,9 +144,9 @@ func TestStatementsPostgresIntegration(t *testing.T) {
 			return tracker.Observe(collect())
 		}
 		regression := func(r sqlstats.Report) *sqlstats.Regression {
-			for n := range r.Regressions {
-				if r.Regressions[n].Identity == id {
-					return &r.Regressions[n]
+			for n := range r.Episodes {
+				if r.Episodes[n].Identity == id {
+					return &r.Episodes[n]
 				}
 			}
 			return nil

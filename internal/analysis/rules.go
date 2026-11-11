@@ -96,11 +96,8 @@ func (r rules) lock(l evidence.Lock) Analysis {
 func (r rules) statement(s evidence.Statement) Analysis {
 	c := Cause{Category: "slow_query", Title: fmt.Sprintf("Замедлился запрос queryid %s", s.QueryID), Confidence: 0.4, Evidence: r.cite(s.ID),
 		Explanation: "Среднее время выполнения выросло без блокировок и других сигналов."}
-	switch {
-	case s.LoadIncreased:
-		c.Category, c.Explanation = "load_growth", "Запрос вызывается чаще, чем в baseline."
-	case s.SharedReadsPerCall.Baseline != nil && s.SharedReadsPerCall.Incident != nil && *s.SharedReadsPerCall.Incident > 1.5**s.SharedReadsPerCall.Baseline:
-		c.Category, c.Explanation = "plan_regression", "Чтений на вызов стало больше при той же частоте: похоже на смену плана или пропавший индекс."
+	if calls := s.CallsPerSecond; calls.Baseline != nil && calls.Incident != nil && *calls.Incident > 1.5**calls.Baseline {
+		c.Category, c.Explanation = "load_growth", "Запрос вызывается заметно чаще, чем в baseline."
 	}
 	return r.single(c,
 		Recommendation{Action: fmt.Sprintf("Сравнить текущий план queryid %s с прежним и проверить индексы", s.QueryID), Priority: "next", Risk: "low",
@@ -114,7 +111,7 @@ func (r rules) single(c Cause, rec Recommendation, check Check) Analysis {
 
 func (r rules) incident(finding string) (evidence.Incident, bool) {
 	for _, i := range r.p.Incidents {
-		if i.Finding == finding {
+		if contains(i.Findings, finding) {
 			return i, true
 		}
 	}

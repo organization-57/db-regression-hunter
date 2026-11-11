@@ -4,29 +4,31 @@
   "slow_query"
  ],
  "evidence": {
-  "schema": "hunter.evidence/v3",
+  "schema": "hunter.evidence/v4",
   "incidents": [
    {
     "id": "I1",
-    "incident_id": "1794410632252813000-oldest_query_seconds",
-    "finding": "query_age_regression",
+    "incident_id": "1794414865989908000-oldest_query_seconds",
+    "findings": [
+     "query_age_regression"
+    ],
     "status": "open",
-    "started_at": "2026-11-11T15:23:42.255764Z",
+    "started_at": "2026-11-11T16:34:15.998636Z",
     "metric": "oldest_query_seconds",
-    "observed": 11.9,
+    "observed": 11.8,
     "baseline": 0,
     "threshold": 1,
     "peak": 36.9
    }
   ],
   "baseline_window": {
-   "from": "2026-11-11T15:19:12.251611Z",
-   "to": "2026-11-11T15:23:37.254942Z",
+   "from": "2026-11-11T16:29:45.996788Z",
+   "to": "2026-11-11T16:34:11.001563Z",
    "samples": 30
   },
   "incident_window": {
-   "from": "2026-11-11T15:23:42.255764Z",
-   "to": "2026-11-11T15:24:17.255165Z",
+   "from": "2026-11-11T16:34:15.998636Z",
+   "to": "2026-11-11T16:34:50.993116Z",
    "samples": 8
   },
   "metrics": [
@@ -35,7 +37,7 @@
     "name": "oldest_active_query_age",
     "unit": "s",
     "incident_peak": 36.9,
-    "baseline": 0.304,
+    "baseline": 0.297,
     "incident": 19.4
    },
    {
@@ -58,8 +60,8 @@
     "id": "M4",
     "name": "commits_per_second",
     "unit": "tx/s",
-    "baseline": 15.6,
-    "incident": 15.5
+    "baseline": 15.5,
+    "incident": 15.6
    },
    {
     "id": "M5",
@@ -100,18 +102,15 @@
   "long_running_sessions": [
    {
     "id": "S1",
-    "pid": 265,
+    "pid": 510,
     "application": "hunter-demo",
     "state": "active",
     "wait_event": "Timeout:PgSleep",
-    "query_age_seconds": 37,
-    "transaction_age_seconds": 37,
-    "query": "SELECT pg_sleep($1), COALESCE(sum(total_cents),$2) FROM demo_shop.orders WHERE created_at >= now()-$3::interval",
-    "plan": "Aggregate  (cost=266.41..266.42 rows=1 width=36)\n  ->  Bitmap Heap Scan on orders  (cost=82.76..256.57 rows=3932 width=8)\n        Recheck Cond: (created_at >= (now() - $3))\n        ->  Bitmap Index Scan on orders_created  (cost=0.00..81.78 rows=3932 width=0)\n              Index Cond: (created_at >= (now() - $3))"
+    "query_age_seconds": 36.9,
+    "transaction_age_seconds": 36.9
    }
   ],
   "sql_statistics": "ready",
-  "sql_text": "normalized: comments removed, every literal replaced with $n",
   "missing_sources": [
    "application metrics (request rate, errors, latency) are not connected",
    "host metrics (CPU, disk I/O) are not connected",

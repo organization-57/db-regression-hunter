@@ -4,11 +4,8 @@ package sqlstats
 
 import (
 	"math"
-	"sort"
 	"time"
 )
-
-const TopLimit = 20
 
 // QueryID is a decimal string so JSON clients cannot lose bigint precision.
 // All four fields belong to the PostgreSQL statistics entry identity.
@@ -16,7 +13,7 @@ type Identity struct {
 	DatabaseID uint32 `json:"database_id"`
 	UserID     uint32 `json:"user_id"`
 	QueryID    string `json:"query_id"`
-	TopLevel   bool   `json:"top_level"`
+	TopLevel   bool   `json:"-"`
 }
 
 type Counters struct {
@@ -53,43 +50,33 @@ type Query struct {
 }
 
 type Report struct {
-	Available                 bool         `json:"available"`
-	Status                    string       `json:"status"`
-	Reason                    string       `json:"reason,omitempty"`
-	From                      time.Time    `json:"from"`
-	At                        time.Time    `json:"at"`
-	IntervalSeconds           float64      `json:"interval_seconds"`
-	ObservedStatements        int          `json:"observed_statements"`
-	NewStatements             int          `json:"new_statements"`
-	ResetStatements           int          `json:"reset_statements"`
-	MissingStatements         int          `json:"missing_statements"`
-	ActiveStatements          int          `json:"active_statements"`
-	Top                       []Query      `json:"top"`
-	RegressionAnalysis        string       `json:"regression_analysis"`
-	BaselinedStatements       int          `json:"baselined_statements"`
-	AnalysisLimitedStatements int          `json:"analysis_limited_statements"`
-	PendingRegressions        int          `json:"pending_regressions"`
-	ActiveRegressions         int          `json:"active_regressions"`
-	RecoveringRegressions     int          `json:"recovering_regressions"`
-	UnknownRegressions        int          `json:"unknown_regressions"`
-	ResolvedRegressions       int          `json:"resolved_regressions"`
-	RegressionStartedAt       time.Time    `json:"regression_started_at"`
-	Regressions               []Regression `json:"regressions"`
-	// Episodes supplies the detector with every episode before presentation limits.
-	// Clone deliberately omits it from retained snapshots and history.
+	Available                 bool      `json:"available"`
+	Status                    string    `json:"status"`
+	Reason                    string    `json:"reason,omitempty"`
+	From                      time.Time `json:"-"`
+	At                        time.Time `json:"at"`
+	IntervalSeconds           float64   `json:"interval_seconds"`
+	ObservedStatements        int       `json:"observed_statements"`
+	NewStatements             int       `json:"-"`
+	ResetStatements           int       `json:"-"`
+	MissingStatements         int       `json:"-"`
+	ActiveStatements          int       `json:"-"`
+	Queries                   []Query   `json:"-"`
+	BaselinedStatements       int       `json:"baselined_statements"`
+	AnalysisLimitedStatements int       `json:"analysis_limited_statements,omitempty"`
+	PendingRegressions        int       `json:"pending_regressions,omitempty"`
+	ActiveRegressions         int       `json:"active_regressions,omitempty"`
+	RecoveringRegressions     int       `json:"recovering_regressions,omitempty"`
+	UnknownRegressions        int       `json:"unknown_regressions,omitempty"`
+	// Episodes supplies the detector with all updates for this interval.
+	// Clone deliberately omits it from retained snapshots.
 	Episodes []Regression `json:"-"`
 }
 
+// Clone retains only the public summary; samples and episodes belong to the detector.
 func (r Report) Clone() Report {
+	r.Queries = nil
 	r.Episodes = nil
-	r.Top = append([]Query(nil), r.Top...)
-	for n := range r.Top {
-		r.Top[n] = r.Top[n].Clone()
-	}
-	r.Regressions = append([]Regression(nil), r.Regressions...)
-	for n := range r.Regressions {
-		r.Regressions[n] = r.Regressions[n].Clone()
-	}
 	return r
 }
 
@@ -130,7 +117,7 @@ func (t *Tracker) seed(s Snapshot) {
 }
 
 func (t *Tracker) Observe(s Snapshot) Report {
-	r := Report{At: s.At, Available: s.Available, ObservedStatements: len(s.Entries), Top: []Query{}, RegressionAnalysis: "disabled"}
+	r := Report{At: s.At, Available: s.Available, ObservedStatements: len(s.Entries), Queries: []Query{}}
 	if !s.Available || s.At.IsZero() {
 		r.Available = false
 		r.Status = "unavailable"
@@ -191,7 +178,7 @@ func (t *Tracker) Observe(s Snapshot) Report {
 		quality[current.Identity] = "valid"
 		n := float64(calls)
 		elapsed := current.TotalExecMS - old.TotalExecMS
-		r.Top = append(r.Top, Query{
+		r.Queries = append(r.Queries, Query{
 			Identity: current.Identity, Calls: calls, TotalExecMS: elapsed,
 			CallsPerSecond: n / r.IntervalSeconds, MeanExecMS: elapsed / n,
 			SharedReadsPerCall: float64(current.SharedReads-old.SharedReads) / n,
@@ -209,26 +196,7 @@ func (t *Tracker) Observe(s Snapshot) Report {
 	if t.Regressor != nil {
 		t.Regressor.analyze(&r, quality)
 	}
-	sort.Slice(r.Top, func(i, j int) bool {
-		a, b := r.Top[i], r.Top[j]
-		if a.TotalExecMS != b.TotalExecMS {
-			return a.TotalExecMS > b.TotalExecMS
-		}
-		if a.DatabaseID != b.DatabaseID {
-			return a.DatabaseID < b.DatabaseID
-		}
-		if a.UserID != b.UserID {
-			return a.UserID < b.UserID
-		}
-		if a.QueryID != b.QueryID {
-			return a.QueryID < b.QueryID
-		}
-		return a.TopLevel && !b.TopLevel
-	})
-	r.ActiveStatements = len(r.Top)
-	if len(r.Top) > TopLimit {
-		r.Top = r.Top[:TopLimit]
-	}
+	r.ActiveStatements = len(r.Queries)
 	t.seed(s)
 	return r
 }
@@ -243,53 +211,4 @@ func validDelta(a, b Counters) bool {
 		}
 	}
 	return true
-}
-
-const HistoryLimit = 20
-
-// Context preserves a bounded before/during window for an incident. Rankings
-// are evidence about interval cost, not proof that a SQL statement regressed.
-type Context struct {
-	Before  []Report `json:"before"`
-	During  []Report `json:"during"`
-	Dropped int      `json:"dropped"`
-}
-
-func CloneReports(reports []Report) []Report {
-	result := make([]Report, len(reports))
-	for n := range reports {
-		result[n] = reports[n].Clone()
-	}
-	return result
-}
-
-func (c Context) Clone() Context {
-	c.Before = CloneReports(c.Before)
-	c.During = CloneReports(c.During)
-	return c
-}
-
-func (c *Context) Observe(r Report) {
-	if r.Status == "" {
-		return
-	}
-	if len(c.During) == HistoryLimit {
-		copy(c.During[1:], c.During[2:])
-		c.During = c.During[:HistoryLimit-1]
-		c.Dropped++
-	}
-	c.During = append(c.During, r.Clone())
-}
-
-// AppendRecent retains the latest reports for the status endpoint and the
-// pre-incident window. Each owner receives an independent copy of the report.
-func AppendRecent(history []Report, r Report) []Report {
-	if r.Status == "" {
-		return history
-	}
-	if len(history) == HistoryLimit {
-		copy(history, history[1:])
-		history = history[:HistoryLimit-1]
-	}
-	return append(history, r.Clone())
 }

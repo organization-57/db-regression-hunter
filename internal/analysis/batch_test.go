@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/makeev/db-regression-hunter/internal/detector"
-	"github.com/makeev/db-regression-hunter/internal/sqlstats"
 )
 
 func incident(id, status string, started time.Time) *detector.Incident {
@@ -56,7 +55,7 @@ func TestStuckAndOldIncidentsStayOutOfNewBatches(t *testing.T) {
 	t0 := time.Date(2026, 11, 11, 10, 0, 0, 0, time.UTC)
 	b := NewBatcher(25*time.Second, 2*time.Minute)
 	gone := incident("gone-sql", detector.Open, t0)
-	gone.SQLRegression = &sqlstats.Regression{Status: "unknown"}
+	gone.SQLRegression = &detector.SQLRegression{Status: "unknown"}
 	if b.Observe([]*detector.Incident{gone}, t0, false); b.Observe(nil, t0.Add(time.Minute), false) != nil {
 		t.Fatal("an unknown SQL episode alone must not trigger an analysis")
 	}

@@ -59,8 +59,8 @@ func f(v float64) *float64 { return &v }
 func pkg() evidence.Package {
 	complete := true
 	return evidence.Package{Schema: evidence.Schema,
-		Incidents: []evidence.Incident{{ID: "I1", IncidentID: "1-oldest_query_seconds", Finding: "lock_contention", Status: "open"},
-			{ID: "I2", IncidentID: "2-sql", Finding: "sql_execution_regression", Status: "open", Statement: "Q1"}},
+		Incidents: []evidence.Incident{{ID: "I1", IncidentID: "1-oldest_query_seconds", Findings: []string{"query_age_regression", "lock_contention"}, Status: "open"},
+			{ID: "I2", IncidentID: "2-sql", Findings: []string{"sql_execution_regression"}, Status: "open", Statement: "Q1"}},
 		Metrics: []evidence.Metric{
 			{ID: "M1", Name: "oldest_active_query_age", Unit: "s", Change: evidence.Change{Baseline: f(0.3), Incident: f(21.5)}, Peak: f(31)},
 			{ID: "M2", Name: "active_sessions", Unit: "sessions", Change: evidence.Change{Baseline: f(4), Incident: f(11)}},

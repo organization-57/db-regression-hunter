@@ -143,16 +143,19 @@ func (b *Bot) RunWithIncidentLookup(ctx context.Context, status func() string, l
 // FormatIncident is presentation only; the incident JSON contains machine-readable data.
 func FormatIncident(i detector.Incident) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Инцидент %s · %s\nНачало: %s\nСигнал: %s\n", i.ID, i.Status, i.StartedAt.Format(time.RFC3339), i.Finding)
+	findings := make([]string, len(i.Findings))
+	for n, f := range i.Findings {
+		findings[n] = string(f)
+	}
+	fmt.Fprintf(&b, "Инцидент %s · %s\nНачало: %s\nФакты: %s\n", i.ID, i.Status, i.StartedAt.Format(time.RFC3339), strings.Join(findings, ", "))
 	fmt.Fprintf(&b, "%s: %.2f; baseline: %.2f; порог: %.2f; пик: %.2f\n", i.Trigger.Metric, i.Trigger.Observed, i.Trigger.Baseline, i.Trigger.Threshold, i.Peak)
 	if i.Trigger.IntervalSeconds > 0 {
 		fmt.Fprintf(&b, "Интервал измерения: %.1f s\n", i.Trigger.IntervalSeconds)
 	}
 	if i.SQLRegression != nil {
 		r := i.SQLRegression
-		q := r.Current
-		c := q.Comparison
-		fmt.Fprintf(&b, "\nSQL %s · БД %d · роль %d\nСреднее: %.2f ms/вызов; baseline: %.2f ms\nВызовов/s: %.2f; baseline: %.2f\nSQL-состояние: %s", q.QueryID, q.DatabaseID, q.UserID, q.MeanExecMS, c.BaselineMeanExecMS, q.CallsPerSecond, c.BaselineCallsPerSecond, r.Status)
+		q := r
+		fmt.Fprintf(&b, "\nSQL %s · БД %d · роль %d\nСреднее: %.2f ms/вызов; baseline: %.2f ms\nВызовов/s: %.2f; baseline: %.2f\nSQL-состояние: %s", q.QueryID, q.DatabaseID, q.UserID, q.MeanExecMS, i.Trigger.Baseline, q.CallsPerSecond, q.BaselineCallsPerSecond, r.Status)
 		if r.Reason != "" {
 			fmt.Fprintf(&b, " (%s)", r.Reason)
 		}
@@ -171,13 +174,6 @@ func FormatIncident(i detector.Incident) string {
 					break
 				}
 			}
-		}
-		if len(root.Chains) > 0 {
-			chain := []string{}
-			for _, pid := range root.Chains[0] {
-				chain = append(chain, fmt.Sprint(pid))
-			}
-			fmt.Fprintf(&b, "Ожидание: %s\n", strings.Join(chain, " → "))
 		}
 	}
 	fmt.Fprintf(&b, "\nВосстановление: %d/%d; пропусков: %d", i.Recovery.NormalSamples, i.Recovery.RequiredSamples, i.DataGaps)

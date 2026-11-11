@@ -29,7 +29,6 @@ type llmLayer struct {
 	history *evidence.History
 	results analysis.Results
 	pg      *collector.Postgres
-	sqlText bool
 	bot     *telegram.Bot
 	wg      *sync.WaitGroup
 	busy    atomic.Bool
@@ -41,13 +40,12 @@ func newLLM(cfg config.LLM, pg *collector.Postgres, wg *sync.WaitGroup) *llmLaye
 		slog.Info("LLM analysis disabled: GONKA_API_KEY is not set")
 		return nil
 	}
-	slog.Info("LLM analysis enabled", "base_url", cfg.BaseURL, "models", cfg.Models, "delay", cfg.Delay, "sql_text", cfg.SQLText)
+	slog.Info("LLM analysis enabled", "base_url", cfg.BaseURL, "models", cfg.Models, "delay", cfg.Delay)
 	return &llmLayer{
 		analyst: analysis.NewAnalyst(cfg),
 		batcher: analysis.NewBatcher(cfg.Delay, analysisGap),
 		history: evidence.NewHistory(120),
 		pg:      pg,
-		sqlText: cfg.SQLText,
 		wg:      wg,
 	}
 }
@@ -64,7 +62,7 @@ func (l *llmLayer) observe(ctx context.Context, s collector.Snapshot, updates []
 	}
 	during := false
 	for _, u := range updates {
-		if u.Finding != detector.FindingSQLExecutionRegression && u.Status != detector.Resolved {
+		if u.SQLRegression == nil && u.Status != detector.Resolved {
 			during = true
 		}
 	}
@@ -82,7 +80,9 @@ func (l *llmLayer) observe(ctx context.Context, s collector.Snapshot, updates []
 	go func() {
 		defer l.wg.Done()
 		defer l.busy.Store(false)
-		p.Enrich(ctx, l.pg, l.sqlText)
+		if sessions, err := l.pg.LongRunning(ctx); err == nil {
+			p.AddSessions(sessions)
+		}
 		r := l.analyst.Analyze(ctx, p)
 		r.ID = id
 		l.results.Put(r)

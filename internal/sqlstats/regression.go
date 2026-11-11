@@ -143,7 +143,7 @@ func (d *Regressor) addNormal(state *queryBaseline, q Query, seconds float64, at
 	state.lastEligible = at
 }
 
-// analyze runs before top truncation. Quality includes every observed entry,
+// analyze processes all interval samples. Quality includes every observed entry,
 // including idle, reset and newly seen SQL, so disappearance is never recovery.
 func (d *Regressor) analyze(r *Report, quality map[Identity]string) {
 	for id, state := range d.states {
@@ -165,8 +165,8 @@ func (d *Regressor) analyze(r *Report, quality map[Identity]string) {
 		}
 	}
 	var resolved []Regression
-	for n := range r.Top {
-		q := &r.Top[n]
+	for n := range r.Queries {
+		q := &r.Queries[n]
 		state := d.states[q.Identity]
 		if q.Calls < d.minCalls {
 			if state != nil {
@@ -247,7 +247,6 @@ func (d *Regressor) analyze(r *Report, quality map[Identity]string) {
 }
 
 func (d *Regressor) summarize(r *Report, resolved []Regression) {
-	r.RegressionAnalysis = "enabled"
 	var episodes []Regression
 	for _, state := range d.states {
 		if len(state.samples) >= d.size {
@@ -268,12 +267,8 @@ func (d *Regressor) summarize(r *Report, resolved []Regression) {
 				r.RecoveringRegressions++
 			}
 		}
-		if r.RegressionStartedAt.IsZero() || e.StartedAt.Before(r.RegressionStartedAt) {
-			r.RegressionStartedAt = e.StartedAt
-		}
 		episodes = append(episodes, e.Clone())
 	}
-	r.ResolvedRegressions = len(resolved)
 	episodes = append(episodes, resolved...)
 	sort.Slice(episodes, func(i, j int) bool {
 		a, b := episodes[i], episodes[j]
@@ -307,8 +302,4 @@ func (d *Regressor) summarize(r *Report, resolved []Regression) {
 		return a.TopLevel && !b.TopLevel
 	})
 	r.Episodes = episodes
-	if len(episodes) > TopLimit {
-		episodes = episodes[:TopLimit]
-	}
-	r.Regressions = episodes
 }

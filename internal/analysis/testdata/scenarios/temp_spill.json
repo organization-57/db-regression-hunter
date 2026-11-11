@@ -4,30 +4,32 @@
   "temp_spill"
  ],
  "evidence": {
-  "schema": "hunter.evidence/v3",
+  "schema": "hunter.evidence/v4",
   "incidents": [
    {
     "id": "I1",
-    "incident_id": "1794411172254892000-temp_bytes_per_second",
-    "finding": "temp_file_growth",
+    "incident_id": "1794415675990538000-temp_bytes_per_second",
+    "findings": [
+     "temp_file_growth"
+    ],
     "status": "open",
-    "started_at": "2026-11-11T15:32:37.253027Z",
+    "started_at": "2026-11-11T16:47:40.996797Z",
     "metric": "temp_bytes_per_second",
-    "observed": 1318607,
+    "observed": 1649253,
     "baseline": 0,
     "threshold": 65536,
-    "peak": 1975329,
+    "peak": 2307191,
     "interval_seconds": 5
    }
   ],
   "baseline_window": {
-   "from": "2026-11-11T15:28:07.251278Z",
-   "to": "2026-11-11T15:32:32.256576Z",
+   "from": "2026-11-11T16:43:10.997762Z",
+   "to": "2026-11-11T16:47:36.000379Z",
    "samples": 30
   },
   "incident_window": {
-   "from": "2026-11-11T15:32:37.253027Z",
-   "to": "2026-11-11T15:33:17.253006Z",
+   "from": "2026-11-11T16:47:40.996797Z",
+   "to": "2026-11-11T16:48:20.996339Z",
    "samples": 9
   },
   "metrics": [
@@ -36,7 +38,7 @@
     "name": "oldest_active_query_age",
     "unit": "s",
     "incident_peak": 0,
-    "baseline": 0.289,
+    "baseline": 0.286,
     "incident": 0
    },
    {
@@ -59,7 +61,7 @@
     "id": "M4",
     "name": "commits_per_second",
     "unit": "tx/s",
-    "baseline": 15.5,
+    "baseline": 15.4,
     "incident": 16.6
    },
    {
@@ -88,7 +90,7 @@
     "name": "temp_bytes_per_second",
     "unit": "bytes/s",
     "baseline": 0,
-    "incident": 1442701
+    "incident": 1401496
    },
    {
     "id": "M9",
@@ -99,7 +101,6 @@
    }
   ],
   "sql_statistics": "ready",
-  "sql_text": "normalized: comments removed, every literal replaced with $n",
   "missing_sources": [
    "application metrics (request rate, errors, latency) are not connected",
    "host metrics (CPU, disk I/O) are not connected",

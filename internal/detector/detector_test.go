@@ -24,7 +24,7 @@ func TestSustainedRegressionAndRecovery(t *testing.T) {
 	}
 	started := at
 	i := observe(4, 2)
-	if i == nil || !i.StartedAt.Equal(started) || i.Finding != FindingLockWait || i.Trigger.Observed != 4 || i.Trigger.Threshold != 1 {
+	if i == nil || !i.StartedAt.Equal(started) || !i.HasFinding(FindingLockWait) || i.Trigger.Observed != 4 || i.Trigger.Threshold != 1 {
 		t.Fatalf("unexpected investigation: %+v", i)
 	}
 	if observe(5, 2).Notify {
@@ -36,7 +36,7 @@ func TestSustainedRegressionAndRecovery(t *testing.T) {
 	}
 	observe(3, 0)
 	i = observe(4, 0)
-	if i == nil || i.Finding != FindingQueryAgeRegression {
+	if i == nil || !i.HasFinding(FindingQueryAgeRegression) {
 		t.Fatalf("expected new episode without lock attribution: %+v", i)
 	}
 }
