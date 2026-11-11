@@ -32,6 +32,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	llmConfig, err := config.LoadLLM()
+	if err != nil {
+		return err
+	}
 	pg, err := collector.New(cfg.DatabaseURL)
 	if err != nil {
 		return fmt.Errorf("invalid PostgreSQL connection configuration")
@@ -49,9 +53,12 @@ func run() error {
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: httpapi.Handler(store, maxAge), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
 	var wg sync.WaitGroup
 	var bot *telegram.Bot
+	ai := newLLM(llmConfig, pg, &wg)
+	server.Handler = ai.handler(server.Handler)
 	notifications := make(chan detector.Incident, 16)
 	if cfg.TelegramToken != "" {
 		bot = telegram.New(cfg.TelegramToken, cfg.TelegramChatID, cfg.GrafanaURL)
+		ai.notify(bot)
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
@@ -64,7 +71,7 @@ func run() error {
 					return "Расследований пока нет (возможен прогрев baseline)"
 				}
 				i := v.Incidents[len(v.Incidents)-1]
-				return bot.IncidentSummary(i)
+				return ai.withAnalysis(bot.IncidentSummary(i), i.ID)
 			}, store.IncidentByID)
 		}()
 		go func() {
@@ -98,6 +105,7 @@ func run() error {
 				s.SQL = sqlTracker.Observe(s.Statements)
 				updates := d.Observe(s)
 				store.Update(s, updates...)
+				ai.observe(ctx, s, updates)
 				for _, i := range updates {
 					if i.Notify {
 						slog.Info("incident transition", "id", i.ID, "status", i.Status, "blockers", len(i.Blockers), "finding", i.Finding)
