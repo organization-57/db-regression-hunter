@@ -31,7 +31,7 @@ func StatusSummary(view state.View, pollInterval time.Duration, now time.Time) s
 		if !view.Healthy {
 			message.WriteString("Последние известные данные\n")
 		}
-		fmt.Fprintf(&message, "Активных сессий: %d\nОжидают блокировку Lock: %d\nВозраст самого старого активного запроса: %.2f с\n", snapshot.Active, snapshot.LockWaiters, snapshot.OldestQuerySeconds)
+		fmt.Fprintf(&message, "Активных сессий: %d\nЗависших на блокировках транзакций: %d\nВозраст самого старого активного запроса: %.2f с\n", snapshot.Active, snapshot.LockWaiters, snapshot.OldestQuerySeconds)
 	}
 	fmt.Fprintf(&message, "\nСохранено расследований: %d\n", len(view.Incidents))
 	if len(view.Incidents) == 0 {

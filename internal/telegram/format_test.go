@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/makeev/db-regression-hunter/internal/collector"
 	"github.com/makeev/db-regression-hunter/internal/detector"
 )
 
@@ -91,5 +92,36 @@ func TestFormatIncidentReadableFindings(t *testing.T) {
 	}
 	if i.Findings[0] != detector.FindingQueryAgeRegression {
 		t.Fatal("presentation changed machine-readable findings")
+	}
+}
+
+func TestFormatIncidentReadableMetrics(t *testing.T) {
+	for _, tc := range []struct{ metric, label string }{
+		{"oldest_query_seconds", "возраст самого старого активного запроса, с"},
+		{"active_sessions", "активные сессии"},
+		{"temp_bytes_per_second", "временные файлы, байт/с"},
+		{"deadlocks_delta", "deadlock за интервал"},
+		{"sql_mean_exec_ms", "среднее время выполнения SQL, мс/вызов"},
+	} {
+		t.Run(tc.metric, func(t *testing.T) {
+			i := detector.Incident{Trigger: detector.Trigger{Metric: tc.metric, Observed: 4, Baseline: 1, Threshold: 3}, Peak: 5}
+			text := FormatIncident(i)
+			if !strings.Contains(text, tc.label+": 4.00; baseline: 1.00; threshold: 3.00; peak: 5.00") || strings.Contains(text, tc.metric) {
+				t.Fatal("incorrect metric label", text)
+			}
+		})
+	}
+}
+
+func TestFormatIncidentExplainsBlocker(t *testing.T) {
+	i := detector.Incident{Blockers: []detector.Blocker{{PID: 52286}},
+		BlockingGraph: &collector.BlockingGraph{Nodes: []collector.Session{{PID: 52286, Application: "hunter-demo", State: "idle in transaction", TransactionAgeSeconds: 22.2}}}}
+	text := FormatIncident(i)
+	if !strings.Contains(text, "🔒 PID 52286 — корневой блокировщик других сессий\nhunter-demo · простой с открытой транзакцией · возраст транзакции 22.2 с") {
+		t.Fatal("missing blocker explanation", text)
+	}
+	i.BlockingGraph = nil
+	if !strings.Contains(FormatIncident(i), "🔒 PID 52286 — корневой блокировщик других сессий") {
+		t.Fatal("missing blocker without session details")
 	}
 }
