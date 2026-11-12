@@ -160,9 +160,9 @@ func FormatIncident(i detector.Incident) string {
 		indicator = "🟢"
 	}
 	fmt.Fprintf(&b, "%s Инцидент %s · %s\nНачало: %s\nФакты: %s\n", indicator, i.ID, i.Status, formatTime(i.StartedAt), strings.Join(findings, ", "))
-	fmt.Fprintf(&b, "%s: %.2f; baseline: %.2f; threshold: %.2f; peak: %.2f\n", i.Trigger.Metric, i.Trigger.Observed, i.Trigger.Baseline, i.Trigger.Threshold, i.Peak)
+	fmt.Fprintf(&b, "%s: %.2f; baseline: %.2f; threshold: %.2f; peak: %.2f\n", metricName(i.Trigger.Metric), i.Trigger.Observed, i.Trigger.Baseline, i.Trigger.Threshold, i.Peak)
 	if i.Trigger.IntervalSeconds > 0 {
-		fmt.Fprintf(&b, "Интервал измерения: %.1f s\n", i.Trigger.IntervalSeconds)
+		fmt.Fprintf(&b, "Интервал измерения: %.1f с\n", i.Trigger.IntervalSeconds)
 	}
 	if i.SQLRegression != nil {
 		r := i.SQLRegression
@@ -177,11 +177,11 @@ func FormatIncident(i detector.Incident) string {
 			fmt.Fprintf(&b, "Ещё блокировщиков: %d\n", len(i.Blockers)-n)
 			break
 		}
-		fmt.Fprintf(&b, "\nКорневой PID %d\n", root.PID)
+		fmt.Fprintf(&b, "\n🔒 PID %d — корневой блокировщик других сессий\n", root.PID)
 		if i.BlockingGraph != nil {
 			for _, session := range i.BlockingGraph.Nodes {
 				if session.PID == root.PID {
-					fmt.Fprintf(&b, "%s · %s · транзакция %.1f s\n", session.Application, session.State, session.TransactionAgeSeconds)
+					fmt.Fprintf(&b, "%s · %s · возраст транзакции %.1f с\n", session.Application, sessionStateName(session.State), session.TransactionAgeSeconds)
 					break
 				}
 			}

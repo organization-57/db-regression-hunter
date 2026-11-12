@@ -18,6 +18,8 @@ var categoryNames = map[string]string{
 }
 
 var metricNames = map[string]string{
+	"oldest_query_seconds": "возраст самого старого активного запроса, с",
+	"deadlocks_delta":      "deadlock за интервал", "sql_mean_exec_ms": "среднее время выполнения SQL, мс/вызов",
 	"oldest_active_query_age": "возраст самого старого запроса, с", "active_sessions": "активные сессии", "lock_waiting_sessions": "ожидают блокировку",
 	"commits_per_second": "коммиты в секунду", "rollbacks_per_second": "откаты в секунду", "deadlocks_per_second": "deadlock в секунду",
 	"blocks_read_per_second": "чтения блоков в секунду", "temp_bytes_per_second": "временные файлы, байт/с", "cache_hit_ratio": "попадания в кеш, %",
@@ -66,11 +68,7 @@ func fact(p *evidence.Package, id string) string {
 	}
 	for _, m := range p.Metrics {
 		if m.ID == id {
-			name := metricNames[m.Name]
-			if name == "" {
-				name = m.Name
-			}
-			return fmt.Sprintf("%s: %s → %s", name, number(m.Baseline), number(m.Incident))
+			return fmt.Sprintf("%s: %s → %s", metricName(m.Name), number(m.Baseline), number(m.Incident))
 		}
 	}
 	for _, l := range p.Locks {
