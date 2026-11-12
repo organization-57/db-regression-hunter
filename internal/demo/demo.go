@@ -52,7 +52,7 @@ func LoadConfig() (Config, error) {
 	}
 	c.Warmup = time.Duration(baseline+confirm+2) * poll
 	c.Duration = time.Duration(confirm+2)*poll + 10*time.Second
-	c.Cooldown = 3 * time.Minute
+	c.Cooldown = time.Minute
 	for _, item := range []struct {
 		key    string
 		target *time.Duration

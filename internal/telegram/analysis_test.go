@@ -19,12 +19,12 @@ func TestFormatAnalysisShowsFactsInsteadOfIDs(t *testing.T) {
 	r := analysis.Result{Status: analysis.Done, Model: "deepseek-ai/DeepSeek-V4-Flash-0731", LatencyMs: 21000, IncidentIDs: []string{"a", "b"}, Evidence: p,
 		Analysis: &analysis.Analysis{
 			Summary:         "PID 4127 держит строку.",
-			RootCauses:      []analysis.Cause{{Category: "long_transaction", Title: "Незавершённая транзакция", Confidence: 0.9, Evidence: []string{"L1", "M3"}, Explanation: "…"}},
+			RootCauses:      []analysis.Cause{{Category: "long_transaction", Title: "Незавершённая транзакция", Confidence: 0.9, Evidence: []string{"L1", "M3", "I1"}, Explanation: "…"}},
 			Recommendations: []analysis.Recommendation{{Action: "Завершить PID 4127", Priority: "now", SQL: "SELECT pg_terminate_backend(4127)", Verify: "ожидающих 0", RequiresApproval: true}},
 			Assumptions:     []string{"транзакцию забыло закрыть приложение"},
 		}}
 	text := FormatAnalysis(r)
-	for _, want := range []string{"сигналы: блокировки, транзакция простаивает, замедление SQL", "Предположения, не подтверждённые данными: транзакцию забыло закрыть приложение", "долгая транзакция (уверенность высокая)", "• PID 4127 (shop, idle in transaction, транзакция 34 с) блокирует 7; запрос: UPDATE demo_shop.inventory SET updated_at=now() WHERE product_id=$1",
+	for _, want := range []string{"сигналы: найдены корневые блокировщики, простой с открытой транзакцией, замедление SQL", "сигнал найдены корневые блокировщики, простой с открытой транзакцией: peak 0; threshold 0", "Предположения, не подтверждённые данными: транзакцию забыло закрыть приложение", "долгая транзакция (уверенность высокая)", "• PID 4127 (shop, idle in transaction, транзакция 34 с) блокирует 7; запрос: UPDATE demo_shop.inventory SET updated_at=now() WHERE product_id=$1",
 		"• ожидают блокировку: 0 → 6", "[сейчас, нужно подтверждение]", "DeepSeek-V4-Flash-0731 · 21 с"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q in:\n%s", want, text)

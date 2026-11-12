@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log/slog"
 	"net/http"
@@ -59,15 +60,15 @@ func (b *Bot) call(ctx context.Context, method string, payload any, result any) 
 }
 
 func (b *Bot) Send(ctx context.Context, message string) error {
-	return b.call(ctx, "sendMessage", map[string]any{"chat_id": b.chatID, "text": message, "link_preview_options": map[string]bool{"is_disabled": true}}, nil)
+	return b.sendHTML(ctx, html.EscapeString(message))
+}
+
+func (b *Bot) sendHTML(ctx context.Context, message string) error {
+	return b.call(ctx, "sendMessage", map[string]any{"chat_id": b.chatID, "text": message, "parse_mode": "HTML", "link_preview_options": map[string]bool{"is_disabled": true}}, nil)
 }
 
 func (b *Bot) Notify(ctx context.Context, i detector.Incident) error {
-	message := FormatIncident(i)
-	if b.grafanaURL != "" {
-		message += "\n\nGrafana: " + b.grafanaURL
-	}
-	return b.Send(ctx, message)
+	return b.sendHTML(ctx, b.IncidentSummary(i))
 }
 
 func (b *Bot) Run(ctx context.Context, status func() string, latest func() string) {
@@ -75,6 +76,7 @@ func (b *Bot) Run(ctx context.Context, status func() string, latest func() strin
 }
 
 // RunWithIncidentLookup adds ID lookup while preserving the original Run API.
+// latest and Annotate return Telegram HTML; status returns plain text.
 func (b *Bot) RunWithIncidentLookup(ctx context.Context, status func() string, latest func() string, lookup func(string) (detector.Incident, bool)) {
 	var offset int64
 	for ctx.Err() == nil {
@@ -110,11 +112,13 @@ func (b *Bot) RunWithIncidentLookup(ctx context.Context, status func() string, l
 			}
 			command := strings.SplitN(parts[0], "@", 2)[0]
 			var answer string
+			isHTML := false
 			switch command {
 			case "/status":
 				answer = status()
 			case "/incidents":
 				answer = latest()
+				isHTML = true
 			case "/incident":
 				if len(parts) != 2 {
 					answer = "Использование: /incident <ID>"
@@ -122,6 +126,7 @@ func (b *Bot) RunWithIncidentLookup(ctx context.Context, status func() string, l
 					answer = "Поиск расследований по ID недоступен"
 				} else if incident, ok := lookup(parts[1]); ok {
 					answer = b.IncidentSummary(incident)
+					isHTML = true
 					if b.Annotate != nil {
 						answer = b.Annotate(answer, incident.ID)
 					}
@@ -133,7 +138,10 @@ func (b *Bot) RunWithIncidentLookup(ctx context.Context, status func() string, l
 			default:
 				continue
 			}
-			if err := b.Send(ctx, answer); err != nil {
+			if !isHTML {
+				answer = html.EscapeString(answer)
+			}
+			if err := b.sendHTML(ctx, answer); err != nil {
 				slog.Warn("Telegram reply failed", "error", err)
 			}
 		}
@@ -145,21 +153,24 @@ func FormatIncident(i detector.Incident) string {
 	var b strings.Builder
 	findings := make([]string, len(i.Findings))
 	for n, f := range i.Findings {
-		findings[n] = string(f)
+		findings[n] = findingName(string(f))
 	}
-	fmt.Fprintf(&b, "Инцидент %s · %s\nНачало: %s\nФакты: %s\n", i.ID, i.Status, i.StartedAt.Format(time.RFC3339), strings.Join(findings, ", "))
-	fmt.Fprintf(&b, "%s: %.2f; baseline: %.2f; порог: %.2f; пик: %.2f\n", i.Trigger.Metric, i.Trigger.Observed, i.Trigger.Baseline, i.Trigger.Threshold, i.Peak)
+	indicator := "🔴"
+	if i.Status == detector.Resolved {
+		indicator = "🟢"
+	}
+	fmt.Fprintf(&b, "%s Инцидент %s · %s\nНачало: %s\nФакты: %s\n", indicator, i.ID, i.Status, formatTime(i.StartedAt), strings.Join(findings, ", "))
+	fmt.Fprintf(&b, "%s: %.2f; baseline: %.2f; threshold: %.2f; peak: %.2f\n", i.Trigger.Metric, i.Trigger.Observed, i.Trigger.Baseline, i.Trigger.Threshold, i.Peak)
 	if i.Trigger.IntervalSeconds > 0 {
 		fmt.Fprintf(&b, "Интервал измерения: %.1f s\n", i.Trigger.IntervalSeconds)
 	}
 	if i.SQLRegression != nil {
 		r := i.SQLRegression
-		q := r
-		fmt.Fprintf(&b, "\nSQL %s · БД %d · роль %d\nСреднее: %.2f ms/вызов; baseline: %.2f ms\nВызовов/s: %.2f; baseline: %.2f\nSQL-состояние: %s", q.QueryID, q.DatabaseID, q.UserID, q.MeanExecMS, i.Trigger.Baseline, q.CallsPerSecond, q.BaselineCallsPerSecond, r.Status)
-		if r.Reason != "" {
-			fmt.Fprintf(&b, " (%s)", r.Reason)
+		fmt.Fprintf(&b, "\nSQL %s\nСреднее: %.2f ms/вызов; baseline: %.2f ms\nВызовов/s: %.2f; baseline: %.2f\n", r.QueryID, r.MeanExecMS, i.Trigger.Baseline, r.CallsPerSecond, r.BaselineCallsPerSecond)
+		if r.Status == "unknown" {
+			b.WriteString("Недостаточно данных, чтобы оценить восстановление\n")
 		}
-		fmt.Fprintf(&b, "\nПоследнее SQL-наблюдение: %s\nИзменение времени выполнения SQL не устанавливает причину или влияние на latency приложения.\n", r.LastObservedAt.Format(time.RFC3339))
+		fmt.Fprintf(&b, "Последнее SQL-наблюдение: %s\n", formatTime(r.LastObservedAt))
 	}
 	for n, root := range i.Blockers {
 		if n == 3 {
@@ -178,11 +189,7 @@ func FormatIncident(i detector.Incident) string {
 	}
 	fmt.Fprintf(&b, "\nВосстановление: %d/%d; пропусков: %d", i.Recovery.NormalSamples, i.Recovery.RequiredSamples, i.DataGaps)
 	if i.ResolvedAt != nil {
-		fmt.Fprintf(&b, "\nВосстановление подтверждено: %s", i.ResolvedAt.Format(time.RFC3339))
+		fmt.Fprintf(&b, "\nВосстановление подтверждено: %s", formatTime(*i.ResolvedAt))
 	}
-	text := []rune(b.String())
-	if len(text) > 3000 {
-		return string(text[:2990]) + "…"
-	}
-	return string(text)
+	return LimitText(b.String(), 3000)
 }

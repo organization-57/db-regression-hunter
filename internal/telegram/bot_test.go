@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"encoding/json"
+	"html"
 	"io"
 	"net/http"
 	"strings"
@@ -78,7 +79,7 @@ func TestIncidentCommand(t *testing.T) {
 						if payload.Text != b.IncidentSummary(i) {
 							t.Fatal("lookup must reuse incident formatter", payload.Text)
 						}
-					} else if !strings.Contains(payload.Text, tc.want) {
+					} else if !strings.Contains(html.UnescapeString(payload.Text), tc.want) {
 						t.Fatalf("expected %q in %q", tc.want, payload.Text)
 					}
 					if tc.annotate && !strings.HasSuffix(payload.Text, "analysis:"+i.ID) {

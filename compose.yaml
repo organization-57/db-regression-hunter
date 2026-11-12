@@ -37,7 +37,7 @@ services:
       CONFIRM_SAMPLES: ${CONFIRM_SAMPLES:-3}
       DEMO_WARMUP: ${DEMO_WARMUP:-}
       DEMO_INCIDENT_DURATION: ${DEMO_INCIDENT_DURATION:-}
-      DEMO_COOLDOWN: ${DEMO_COOLDOWN:-3m}
+      DEMO_COOLDOWN: ${DEMO_COOLDOWN:-60s}
       DEMO_SCENARIOS: ${DEMO_SCENARIOS:-row_lock,slow_report,table_lock,lock_chain,temp_spill,session_burst,deadlock}
     depends_on:
       postgres:
