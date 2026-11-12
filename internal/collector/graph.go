@@ -11,6 +11,7 @@ import (
 const maxSessions = 256
 
 type Session struct {
+	ObservedAt            time.Time  `json:"-"`
 	PID                   int        `json:"pid"`
 	BackendStart          *time.Time `json:"backend_start,omitempty"`
 	QueryStart            *time.Time `json:"-"`
@@ -46,7 +47,7 @@ func collectGraph(ctx context.Context, tx *sql.Tx, at time.Time) (*BlockingGraph
 COALESCE(application_name,''), COALESCE(state,'unknown'), COALESCE(wait_event_type,''), COALESCE(wait_event,''),
 COALESCE(GREATEST(0,extract(epoch FROM clock_timestamp()-xact_start)),0)::float8,
 COALESCE(GREATEST(0,extract(epoch FROM clock_timestamp()-query_start)),0)::float8,
-to_json(pg_blocking_pids(pid)), query_start, xact_start
+to_json(pg_blocking_pids(pid)), query_start, xact_start, clock_timestamp()
 FROM pg_stat_activity WHERE pid<>pg_backend_pid()
 ORDER BY (wait_event_type='Lock') DESC NULLS LAST, (datname=current_database()) DESC NULLS LAST, pid
 LIMIT 257`)
@@ -58,7 +59,7 @@ LIMIT 257`)
 	for rows.Next() {
 		var s Session
 		var blocked []byte
-		if err := rows.Scan(&s.PID, &s.BackendStart, &s.TargetDatabase, &s.Application, &s.State, &s.WaitEventType, &s.WaitEvent, &s.TransactionAgeSeconds, &s.QueryAgeSeconds, &blocked, &s.QueryStart, &s.TransactionStart); err != nil {
+		if err := rows.Scan(&s.PID, &s.BackendStart, &s.TargetDatabase, &s.Application, &s.State, &s.WaitEventType, &s.WaitEvent, &s.TransactionAgeSeconds, &s.QueryAgeSeconds, &blocked, &s.QueryStart, &s.TransactionStart, &s.ObservedAt); err != nil {
 			return nil, err
 		}
 		if len(all) == maxSessions {

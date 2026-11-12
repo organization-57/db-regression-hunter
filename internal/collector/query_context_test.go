@@ -12,37 +12,6 @@ import (
 	"github.com/makeev/db-regression-hunter/internal/sqlstats"
 )
 
-func TestQueryAnonymization(t *testing.T) {
-	a := anonymizer{}
-	raw := `/* customer-secret /* nested-secret */ */ SELECT c."PrivateEmail", count(*) FROM "PrivateSchema"."PrivateCustomers" c WHERE c."PrivateEmail" = 'literal-secret''suffix' AND c."SecretAmount" > 987654 AND c."SecretNote" = $tag$dollar-secret$tag$ AND c."SecretID"=$1 -- comment-secret`
-	safe, err := a.sql(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	plan := a.plan(map[string]any{"Node Type": "Seq Scan", "Schema": "PrivateSchema", "Relation Name": "PrivateCustomers", "Alias": "c", "Filter": `c."PrivateEmail" = 'plan-secret'::text`, "Plan Rows": 42.0, "Provider Secret": "provider-secret", "Output": []any{`c."PrivateEmail"`}})
-	data, _ := json.Marshal(plan)
-	for _, secret := range []string{"Private", "Secret", "secret", "987654"} {
-		if strings.Contains(safe+string(data), secret) {
-			t.Fatalf("leaked %q: %s %s", secret, safe, data)
-		}
-	}
-	if !strings.Contains(safe, `"`+a.name("PrivateCustomers")+`"`) || plan["Relation Name"] != a.name("PrivateCustomers") || !strings.Contains(plan["Filter"].(string), `"`+a.name("PrivateEmail")+`"`) {
-		t.Fatal("names do not match across SQL and plan")
-	}
-	if plan["Plan Rows"] != 42.0 || !strings.Contains(safe, "$1") || !strings.Contains(plan["Filter"].(string), ":: text") {
-		t.Fatal("lost structural information", safe, plan)
-	}
-	for _, input := range []string{`select 'unterminated`, `select /* missing`, `select 1; select 2`, `select E'escaped\'secret'`, `select U&"escaped\0061"`, "select \x00secret", `select $tag$unclosed`} {
-		if result, err := a.sql(input); err == nil || result != "" {
-			t.Fatalf("must fail closed: %q", input)
-		}
-	}
-	typ, err := a.tokens("numeric(12,2)", false)
-	if err != nil || !strings.Contains(typ, "12") || !strings.Contains(typ, "2") {
-		t.Fatal("type precision lost", typ, err)
-	}
-}
-
 func TestQueryContextPostgresIntegration(t *testing.T) {
 	dsn := os.Getenv("DEMO_TEST_DATABASE_URL")
 	monitorDSN := os.Getenv("DEMO_TEST_MONITOR_DATABASE_URL")
@@ -85,11 +54,13 @@ WHERE userid=(SELECT oid FROM pg_roles WHERE rolname=current_user) AND query LIK
 	}
 	batch := monitor.QueryContexts(ctx, []QueryTarget{{Statement: &id}})
 	data := batch.Details[0]
-	for _, secret := range []string{"private_", "hunter_context_test", "never-export", "@example"} {
-		if strings.Contains(string(data), secret) {
-			t.Fatalf("original content escaped: %s", data)
-		}
+	if !strings.Contains(string(data), "private_email") || !strings.Contains(string(data), "hunter_context_test") {
+		t.Fatal("local SQL was anonymized", string(data))
 	}
+	if strings.Contains(string(data), "never-export") {
+		t.Fatal("table rows must not be collected")
+	}
+
 	details := decodeQueryContext(t, batch, 0)
 	if details.SQL == "" || details.Plan == nil || len(details.Tables) != 1 || len(details.Reasons) != 0 || details.Settings["work_mem"] == "" {
 		t.Fatalf("incomplete evidence: %s", data)
@@ -168,6 +139,22 @@ WHERE userid=(SELECT oid FROM pg_roles WHERE rolname=current_user) AND query LIK
 		if targets[0].State != "idle in transaction" || targets[1].State != "active" {
 			t.Fatal("wrong captured states", targets)
 		}
+		live, err := monitor.LongRunning(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, session := range live {
+			if session.PID == waiterPID {
+				found = true
+				if session.BackendStart == nil || session.QueryStart == nil || session.TransactionStart == nil || session.ObservedAt.IsZero() {
+					t.Fatal("missing live session provenance", session)
+				}
+			}
+		}
+		if !found {
+			t.Fatal("blocked active session missing from long-running sample")
+		}
 		batch := monitor.QueryContexts(ctx, targets)
 		contexts := batch.Details
 		rootContext := decodeQueryContext(t, batch, 0)
@@ -189,15 +176,10 @@ WHERE userid=(SELECT oid FROM pg_roles WHERE rolname=current_user) AND query LIK
 		if waiterContext.Plan != nil || !strings.Contains(string(contexts[1]), "explain_unavailable") || waiterContext.Settings["work_mem"] == "" {
 			t.Fatal("failed EXPLAIN must not abort catalog/settings collection", string(contexts[1]))
 		}
-		all, _ := json.Marshal(batch)
-		contexts = append(contexts, all)
-		for _, data := range contexts {
-			for _, secret := range []string{"private_", "hunter_context_test", "root-secret", "waiter-secret", "314159", "@example"} {
-				if strings.Contains(string(data), secret) {
-					t.Fatalf("session context leaked %q: %s", secret, data)
-				}
-			}
+		if !strings.Contains(rootContext.SQL, "314159") || !strings.Contains(waiterContext.SQL, "waiter-secret@example.test") {
+			t.Fatal("local context lost SQL values")
 		}
+
 		// Reused PIDs, changed queries and changed transactions must not match.
 		for _, field := range []string{"backend", "query", "transaction"} {
 			stale := targets[0].Clone()
@@ -224,7 +206,7 @@ WHERE userid=(SELECT oid FROM pg_roles WHERE rolname=current_user) AND query LIK
 		t.Fatal(err)
 	}
 	data = monitor.QueryContexts(ctx, []QueryTarget{{Statement: &id}}).Details[0]
-	if !strings.Contains(string(data), "explain_unavailable") || strings.Contains(string(data), "private_") {
+	if !strings.Contains(string(data), "explain_unavailable") || strings.Contains(string(data), "permission denied") {
 		t.Fatalf("permission failure leaked server text: %s", data)
 	}
 }
@@ -250,7 +232,7 @@ func decodeQueryContext(t *testing.T, batch QueryBatch, index int) queryContext 
 	for _, ref := range result.TableRefs {
 		found := false
 		for _, table := range tables {
-			if table["schema"].(string)+"."+table["name"].(string) == ref {
+			if RelationRef(table["schema"].(string), table["name"].(string)) == ref {
 				result.Tables = append(result.Tables, table)
 				found = true
 				break

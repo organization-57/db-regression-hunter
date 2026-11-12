@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/makeev/db-regression-hunter/internal/redact"
 	"github.com/makeev/db-regression-hunter/internal/sqlstats"
 )
 
@@ -57,20 +58,19 @@ type QueryBatch struct {
 	Settings json.RawMessage
 }
 
-// QueryContexts uses one ephemeral name dictionary and one table cache per batch.
+// QueryContexts retains the full local context and shares table metadata per batch.
 func (p *Postgres) QueryContexts(parent context.Context, targets []QueryTarget) QueryBatch {
 	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
 	defer cancel()
-	a := anonymizer{}
 	cache := map[string]map[string]any{}
 	seen := map[string]bool{}
 	var tables []json.RawMessage
 	var batch QueryBatch
 	tableBytes := 0
 	for _, target := range targets {
-		result := p.queryContext(ctx, target, a, cache)
+		result := p.queryContext(ctx, target, cache)
 		for _, table := range result.Tables {
-			ref := table["schema"].(string) + "." + table["name"].(string)
+			ref := RelationRef(table["schema"].(string), table["name"].(string))
 			if !seen[ref] {
 				data, _ := json.Marshal(table)
 				if tableBytes+len(data) > 1024*1024 {
@@ -100,11 +100,15 @@ func (p *Postgres) QueryContexts(parent context.Context, targets []QueryTarget) 
 	return batch
 }
 
-func (p *Postgres) queryContext(ctx context.Context, target QueryTarget, a anonymizer, cache map[string]map[string]any) queryContext {
+func (p *Postgres) queryContext(ctx context.Context, target QueryTarget, cache map[string]map[string]any) queryContext {
 	result := queryContext{At: time.Now().UTC(), TableScope: "plan_relations", QuerySource: "normalized_statement"}
 	finish := func(reason string) queryContext {
 		if reason != "" {
 			result.Reasons = append(result.Reasons, reason)
+		}
+		if len(result.SQL) > 64*1024 {
+			result.SQL = strings.ToValidUTF8(result.SQL[:64*1024], "")
+			result.Reasons = append(result.Reasons, "sql_truncated")
 		}
 		return result
 	}
@@ -132,9 +136,9 @@ func (p *Postgres) queryContext(ctx context.Context, target QueryTarget, a anony
 			return finish(statementError(err))
 		}
 		// pg_stat_statements returns a representative query, not bindings.
-		err = tx.QueryRowContext(ctx, `SELECT query FROM `+pgx.Identifier{schema}.Sanitize()+`.pg_stat_statements(true)
+		err = tx.QueryRowContext(ctx, `SELECT query,clock_timestamp() FROM `+pgx.Identifier{schema}.Sanitize()+`.pg_stat_statements(true)
 WHERE dbid=$1 AND userid=$2 AND queryid=$3::bigint AND toplevel=$4
-AND dbid=(SELECT oid FROM pg_database WHERE datname=current_database())`, id.DatabaseID, id.UserID, id.QueryID, id.TopLevel).Scan(&raw)
+AND dbid=(SELECT oid FROM pg_database WHERE datname=current_database())`, id.DatabaseID, id.UserID, id.QueryID, id.TopLevel).Scan(&raw, &result.At)
 		if err != nil {
 			return finish("query_unavailable")
 		}
@@ -149,17 +153,15 @@ AND dbid=(SELECT oid FROM pg_database WHERE datname=current_database())`, id.Dat
 		}
 		var local bool
 		var textLimit int
-		err = tx.QueryRowContext(ctx, `SELECT query, datid=(SELECT oid FROM pg_database WHERE datname=current_database()), pg_size_bytes(current_setting('track_activity_query_size'))
+		err = tx.QueryRowContext(ctx, `SELECT query, datid=(SELECT oid FROM pg_database WHERE datname=current_database()), pg_size_bytes(current_setting('track_activity_query_size')),clock_timestamp()
 FROM pg_stat_activity WHERE pid=$1 AND backend_start=$2 AND query_start=$3
-AND xact_start IS NOT DISTINCT FROM $4::timestamptz AND state=$5`, target.PID, target.BackendStart, target.QueryStart, target.TransactionStart, target.State).Scan(&raw, &local, &textLimit)
+AND xact_start IS NOT DISTINCT FROM $4::timestamptz AND state=$5`, target.PID, target.BackendStart, target.QueryStart, target.TransactionStart, target.State).Scan(&raw, &local, &textLimit, &result.At)
 		if err != nil {
 			return finish("session_changed_or_unavailable")
 		}
+		result.SQL = raw
 		if !local {
-			result.SQL, err = a.sql(raw)
-			if err != nil {
-				return finish("unsupported_sql")
-			}
+			result.SQL = raw
 			return finish("different_database")
 		}
 		if len(raw) >= textLimit-4 {
@@ -184,7 +186,7 @@ ORDER BY l.locktype,l.mode,n.nspname,c.relname LIMIT 129`, target.PID, target.Ba
 			}
 			lock := map[string]any{"type": kind, "mode": mode, "granted": granted}
 			if schema.Valid && table.Valid {
-				lock["table"] = a.name(schema.String) + "." + a.name(table.String)
+				lock["table"] = RelationRef(schema.String, table.String)
 				relations[schema.String+"\x00"+table.String] = [2]string{schema.String, table.String}
 			}
 			result.Locks = append(result.Locks, lock)
@@ -201,14 +203,9 @@ ORDER BY l.locktype,l.mode,n.nspname,c.relname LIMIT 129`, target.PID, target.Ba
 			result.Reasons = append(result.Reasons, "lock_limit")
 		}
 	}
-	result.SQL, err = a.sql(raw)
-	var plan map[string]any
-	var reason string
-	if err != nil {
-		reason = "unsupported_sql"
-	} else {
-		plan, reason = readPlan(ctx, conn, tx, raw, result.SQL)
-	}
+	result.SQL = raw
+	plan, reason := readPlan(ctx, conn, tx, raw)
+
 	if reason != "" {
 		result.Reasons = append(result.Reasons, reason)
 	}
@@ -231,7 +228,7 @@ ORDER BY l.locktype,l.mode,n.nspname,c.relname LIMIT 129`, target.PID, target.Ba
 	if plan != nil {
 		result.PlanKind = "generic_monitor_role"
 		collect(plan)
-		result.Plan = a.plan(plan)
+		result.Plan = plan
 	}
 	keys := make([]string, 0, len(relations))
 	for key := range relations {
@@ -247,7 +244,7 @@ ORDER BY l.locktype,l.mode,n.nspname,c.relname LIMIT 129`, target.PID, target.Ba
 		table := cache[key]
 		if table == nil {
 			var err error
-			table, err = readTable(ctx, tx, r[0], r[1], a)
+			table, err = readTable(ctx, tx, r[0], r[1])
 			if err != nil {
 				return finish("table_metadata_unavailable")
 			}
@@ -275,8 +272,12 @@ ORDER BY l.locktype,l.mode,n.nspname,c.relname LIMIT 129`, target.PID, target.Ba
 	return finish("")
 }
 
-func readPlan(ctx context.Context, conn *sql.Conn, tx *sql.Tx, raw, safe string) (map[string]any, string) {
-	// Lexing has already rejected stacked statements and ambiguous quoting.
+func readPlan(ctx context.Context, conn *sql.Conn, tx *sql.Tx, raw string) (map[string]any, string) {
+	// Planning raw SQL still requires rejecting stacked statements/ambiguous quoting.
+	safe, err := redact.New().SQL(raw)
+	if err != nil {
+		return nil, "unsupported_sql"
+	}
 	first := strings.Fields(safe)
 	if len(first) == 0 || !strings.Contains(" select with insert update delete ", " "+first[0]+" ") {
 		return nil, "unsupported_statement"
@@ -286,7 +287,7 @@ func readPlan(ctx context.Context, conn *sql.Conn, tx *sql.Tx, raw, safe string)
 	}
 	var data []byte
 	// Bypass pgx's parameter interpolation: $1 belongs to GENERIC_PLAN itself.
-	err := conn.Raw(func(driverConn any) error {
+	err = conn.Raw(func(driverConn any) error {
 		results, err := driverConn.(*stdlib.Conn).Conn().PgConn().Exec(ctx, "EXPLAIN (GENERIC_PLAN, VERBOSE, FORMAT JSON) "+raw).ReadAll()
 		if err != nil {
 			return err
@@ -314,10 +315,10 @@ func readPlan(ctx context.Context, conn *sql.Conn, tx *sql.Tx, raw, safe string)
 	return plans[0].Plan, ""
 }
 
-func readTable(ctx context.Context, tx *sql.Tx, schema, name string, a anonymizer) (map[string]any, error) {
+func readTable(ctx context.Context, tx *sql.Tx, schema, name string) (map[string]any, error) {
 	var oid uint32
 	var data []byte
-	err := tx.QueryRowContext(ctx, `SELECT c.oid, json_build_object(
+	err := tx.QueryRowContext(ctx, `SELECT c.oid, json_build_object('observed_at',clock_timestamp(),
 'estimated_rows',c.reltuples,'heap_bytes',pg_relation_size(c.oid),'total_bytes',pg_total_relation_size(c.oid),
 'index_bytes',pg_indexes_size(c.oid),'live_tuples',s.n_live_tup,'dead_tuples',s.n_dead_tup,
 'modifications_since_analyze',s.n_mod_since_analyze,'last_analyze',s.last_analyze,'last_autoanalyze',s.last_autoanalyze,
@@ -331,7 +332,7 @@ WHERE n.nspname=$1 AND c.relname=$2`, schema, name).Scan(&oid, &data)
 	if err = json.Unmarshal(data, &table); err != nil {
 		return nil, err
 	}
-	table["schema"], table["name"] = a.name(schema), a.name(name)
+	table["schema"], table["name"] = schema, name
 	// No samples, histograms, most-common values, defaults or comments.
 	rows, err := tx.QueryContext(ctx, `SELECT a.attname, format_type(a.atttypid,a.atttypmod),a.attnotnull,
 s.null_frac,s.n_distinct,s.avg_width,s.correlation
@@ -349,12 +350,7 @@ WHERE a.attrelid=$1 AND a.attnum>0 AND NOT a.attisdropped ORDER BY a.attnum LIMI
 		if err = rows.Scan(&col, &typ, &notnull, &nulls, &distinct, &width, &correlation); err != nil {
 			break
 		}
-		var safeType string
-		safeType, err = a.tokens(typ, false)
-		if err != nil {
-			break
-		}
-		c := map[string]any{"name": a.name(col), "type": safeType, "not_null": notnull}
+		c := map[string]any{"name": col, "type": typ, "not_null": notnull}
 		if nulls.Valid {
 			c["null_fraction"] = nulls.Float64
 		}
@@ -392,12 +388,7 @@ WHERE a.attrelid=$1 AND a.attnum>0 AND NOT a.attisdropped ORDER BY a.attnum LIMI
 		if err = rows.Scan(&definition, &valid); err != nil {
 			break
 		}
-		var safe string
-		safe, err = a.sql(definition)
-		if err != nil {
-			break
-		}
-		indexes = append(indexes, map[string]any{"definition": safe, "valid": valid})
+		indexes = append(indexes, map[string]any{"definition": definition, "valid": valid})
 	}
 	if err == nil {
 		err = rows.Err()
@@ -421,12 +412,7 @@ WHERE a.attrelid=$1 AND a.attnum>0 AND NOT a.attisdropped ORDER BY a.attnum LIMI
 		if err = rows.Scan(&definition); err != nil {
 			break
 		}
-		var safe string
-		safe, err = a.sql(definition)
-		if err != nil {
-			break
-		}
-		constraints = append(constraints, safe)
+		constraints = append(constraints, definition)
 	}
 	if err == nil {
 		err = rows.Err()
@@ -443,70 +429,5 @@ WHERE a.attrelid=$1 AND a.attnum>0 AND NOT a.attisdropped ORDER BY a.attnum LIMI
 	return table, nil
 }
 
-// Explicit fields only: EXPLAIN extensions can add arbitrary strings. Expressions
-// go through the same lexer as SQL; unknown fields never pass through unchanged.
-func (a anonymizer) plan(node map[string]any) map[string]any {
-	out := map[string]any{}
-	keys := make([]string, 0, len(node))
-	for k := range node {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		v := node[k]
-		switch k {
-		case "Startup Cost", "Total Cost", "Plan Rows", "Plan Width", "Workers Planned", "Parallel Aware", "Async Capable", "Inner Unique":
-			switch v.(type) {
-			case float64, bool:
-				out[k] = v
-			}
-		case "Relation Name", "Schema", "Alias", "Index Name", "CTE Name":
-			if s, ok := v.(string); ok {
-				out[k] = a.name(s)
-			}
-		case "Node Type", "Join Type", "Strategy", "Partial Mode", "Scan Direction", "Parent Relationship", "Operation":
-			if s, ok := v.(string); ok {
-				// Names of custom scan providers/node types are not trusted.
-				const enums = "|Seq Scan|Index Scan|Index Only Scan|Bitmap Heap Scan|Bitmap Index Scan|BitmapAnd|BitmapOr|Tid Scan|Tid Range Scan|Nested Loop|Hash Join|Merge Join|Hash|Sort|Incremental Sort|Aggregate|Group|Limit|Result|Append|Merge Append|Gather|Gather Merge|Materialize|Memoize|Unique|WindowAgg|Subquery Scan|CTE Scan|WorkTable Scan|Function Scan|Values Scan|Recursive Union|SetOp|LockRows|ModifyTable|Foreign Scan|Custom Scan|Sample Scan|Inner|Left|Right|Full|Semi|Anti|Plain|Sorted|Hashed|Mixed|Simple|Partial|Finalize|Forward|Backward|NoMovement|Outer|Member|Subquery|InitPlan|SubPlan|Insert|Update|Delete|Merge|"
-				if strings.Contains(enums, "|"+s+"|") {
-					out[k] = s
-				} else {
-					out[k] = "redacted"
-				}
-			}
-		case "Filter", "Index Cond", "Recheck Cond", "Hash Cond", "Merge Cond", "Join Filter", "One-Time Filter", "Function Call":
-			if s, ok := v.(string); ok {
-				if safe, err := a.sql(s); err == nil {
-					out[k] = safe
-				} else {
-					out[k] = "redacted"
-				}
-			}
-		case "Output", "Sort Key", "Group Key", "Hash Key", "Presorted Key", "Cache Key":
-			if list, ok := v.([]any); ok {
-				safe := []string{}
-				for _, item := range list {
-					if s, ok := item.(string); ok {
-						if x, err := a.sql(s); err == nil {
-							safe = append(safe, x)
-						} else {
-							safe = append(safe, "redacted")
-						}
-					}
-				}
-				out[k] = safe
-			}
-		case "Plans":
-			if list, ok := v.([]any); ok {
-				children := []map[string]any{}
-				for _, item := range list {
-					if n, ok := item.(map[string]any); ok {
-						children = append(children, a.plan(n))
-					}
-				}
-				out[k] = children
-			}
-		}
-	}
-	return out
-}
+// RelationRef stays unambiguous even when an identifier contains a dot or quote.
+func RelationRef(schema, name string) string { return pgx.Identifier{schema, name}.Sanitize() }

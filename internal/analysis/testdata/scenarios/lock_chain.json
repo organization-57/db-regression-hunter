@@ -5,7 +5,7 @@
   "lock_contention"
  ],
  "evidence": {
-  "schema": "hunter.evidence/v4",
+  "schema": "hunter.evidence/v5",
   "incidents": [
    {
     "id": "I1",
@@ -114,7 +114,10 @@
     "blocking_last_query": "update \"id_1\" . \"id_2\" set \"id_3\" = now ( ) where \"id_4\" = 0",
     "blocking_query_source": "last_statement",
     "blocking_held_locks": [
-     "RowExclusiveLock on id_1.id_2"
+     {
+      "mode": "RowExclusiveLock",
+      "table": "id_1.id_2"
+     }
     ],
     "names_from": "I1",
     "blocking_transaction_age_seconds": 41.8,
@@ -137,8 +140,14 @@
     "blocking_last_query": "update \"id_1\" . \"id_2\" set \"id_5\" = case when \"id_5\" > 0 then \"id_5\" - 0 else 0 end , \"id_3\" = now ( ) where \"id_4\" = $1",
     "blocking_query_source": "active_statement",
     "blocking_held_locks": [
-     "RowExclusiveLock on id_1.id_2",
-     "ExclusiveLock on id_1.id_2"
+     {
+      "mode": "RowExclusiveLock",
+      "table": "id_1.id_2"
+     },
+     {
+      "mode": "ExclusiveLock",
+      "table": "id_1.id_2"
+     }
     ],
     "names_from": "I1",
     "blocking_transaction_age_seconds": 41,
@@ -161,8 +170,14 @@
     "blocking_last_query": "update \"id_1\" . \"id_2\" set \"id_3\" = now ( ) where \"id_4\" = 0",
     "blocking_query_source": "active_statement",
     "blocking_held_locks": [
-     "RowExclusiveLock on id_1.id_2",
-     "ExclusiveLock on id_1.id_2"
+     {
+      "mode": "RowExclusiveLock",
+      "table": "id_1.id_2"
+     },
+     {
+      "mode": "ExclusiveLock",
+      "table": "id_1.id_2"
+     }
     ],
     "names_from": "I1",
     "blocking_transaction_age_seconds": 41.8,
@@ -211,15 +226,19 @@
    {
     "id": "T1",
     "names_from": "I1",
-    "table": "id_1.id_2",
+    "table": "id_2",
     "estimated_rows": 200,
     "total_bytes": 98304,
     "dead_tuples": 121,
     "modifications_since_analyze": 2,
     "last_analyze": "2026-11-11T16:43:24.022542+00:00",
     "indexes": [
-     "create unique index \"id_6\" on \"id_1\" . \"id_2\" using btree ( \"id_4\" )"
-    ]
+     {
+      "definition": "create unique index \"id_6\" on \"id_1\" . \"id_2\" using btree ( \"id_4\" )",
+      "valid": true
+     }
+    ],
+    "schema": "id_1"
    }
   ],
   "settings": {

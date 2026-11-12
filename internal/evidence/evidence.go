@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	Schema          = "hunter.evidence/v4"
+	Schema          = "hunter.evidence/v5"
 	baselineSamples = 30
 	maxLocks        = 8
 	maxStatements   = 5
@@ -76,46 +76,61 @@ type Metric struct {
 }
 
 type Lock struct {
-	ID                    string   `json:"id"`
-	BlockingPID           int      `json:"blocking_pid"`
-	Root                  bool     `json:"root"`
-	BlockingApplication   string   `json:"blocking_application"`
-	BlockingState         string   `json:"blocking_state"`
-	BlockingWaitEvent     string   `json:"blocking_wait_event,omitempty"`
-	BlockingQuery         string   `json:"blocking_last_query,omitempty"`
-	QuerySource           string   `json:"blocking_query_source,omitempty"`
-	HeldLocks             []string `json:"blocking_held_locks,omitempty"`
-	NamesFrom             string   `json:"names_from,omitempty"`
-	TransactionAgeSeconds float64  `json:"blocking_transaction_age_seconds"`
-	BlockedPIDs           []int    `json:"blocked_pids"`
-	BlockedTotal          int      `json:"blocked_total_through_chain"`
-	WaiterWaitEvents      []string `json:"waiter_wait_events"`
-	MaxWaiterQueryAge     float64  `json:"max_waiter_query_age_seconds"`
+	ID                    string         `json:"id"`
+	BlockingPID           int            `json:"blocking_pid"`
+	Root                  bool           `json:"root"`
+	BlockingApplication   string         `json:"blocking_application"`
+	BlockingState         string         `json:"blocking_state"`
+	BlockingWaitEvent     string         `json:"blocking_wait_event,omitempty"`
+	BlockingQuery         string         `json:"blocking_last_query,omitempty"`
+	QuerySource           string         `json:"blocking_query_source,omitempty"`
+	HeldLocks             []HeldLock     `json:"blocking_held_locks,omitempty"`
+	NamesFrom             string         `json:"names_from,omitempty"`
+	BackendStart          *time.Time     `json:"backend_start,omitempty"`
+	QueryStart            *time.Time     `json:"query_start,omitempty"`
+	TransactionStart      *time.Time     `json:"transaction_start,omitempty"`
+	ObservedAt            time.Time      `json:"observed_at"`
+	QueryObservedAt       *time.Time     `json:"query_observed_at,omitempty"`
+	Plan                  map[string]any `json:"plan,omitempty"`
+	PlanKind              string         `json:"plan_kind,omitempty"`
+	TableScope            string         `json:"table_scope,omitempty"`
+	TransactionAgeSeconds float64        `json:"blocking_transaction_age_seconds"`
+	BlockedPIDs           []int          `json:"blocked_pids"`
+	BlockedTotal          int            `json:"blocked_total_through_chain"`
+	WaiterWaitEvents      []string       `json:"waiter_wait_events"`
+	MaxWaiterQueryAge     float64        `json:"max_waiter_query_age_seconds"`
 }
 
 type Session struct {
-	ID              string  `json:"id"`
-	PID             int     `json:"pid"`
-	Application     string  `json:"application"`
-	State           string  `json:"state"`
-	WaitEvent       string  `json:"wait_event,omitempty"`
-	QueryAgeSeconds float64 `json:"query_age_seconds"`
-	TransactionAge  float64 `json:"transaction_age_seconds"`
+	ID               string     `json:"id"`
+	PID              int        `json:"pid"`
+	Application      string     `json:"application"`
+	State            string     `json:"state"`
+	WaitEvent        string     `json:"wait_event,omitempty"`
+	BackendStart     *time.Time `json:"backend_start,omitempty"`
+	QueryStart       *time.Time `json:"query_start,omitempty"`
+	TransactionStart *time.Time `json:"transaction_start,omitempty"`
+	ObservedAt       time.Time  `json:"observed_at"`
+	QueryAgeSeconds  float64    `json:"query_age_seconds"`
+	TransactionAge   float64    `json:"transaction_age_seconds"`
 }
 
 type Statement struct {
-	ID                 string  `json:"id"`
-	QueryID            string  `json:"queryid"`
-	Status             string  `json:"status"`
-	MeanExecMS         Change  `json:"mean_exec_ms"`
-	CallsPerSecond     Change  `json:"calls_per_second"`
-	SharedReadsPerCall float64 `json:"shared_reads_per_call"`
-	SharedHitsPerCall  float64 `json:"shared_hits_per_call"`
-	TempWritesPerCall  float64 `json:"temp_writes_per_call"`
-	RowsPerCall        float64 `json:"rows_per_call"`
-	Query              string  `json:"query,omitempty"`
-	Plan               string  `json:"plan,omitempty"`
-	NamesFrom          string  `json:"names_from,omitempty"`
+	ID                 string         `json:"id"`
+	QueryID            string         `json:"queryid"`
+	Status             string         `json:"status"`
+	MeanExecMS         Change         `json:"mean_exec_ms"`
+	CallsPerSecond     Change         `json:"calls_per_second"`
+	SharedReadsPerCall float64        `json:"shared_reads_per_call"`
+	SharedHitsPerCall  float64        `json:"shared_hits_per_call"`
+	TempWritesPerCall  float64        `json:"temp_writes_per_call"`
+	RowsPerCall        float64        `json:"rows_per_call"`
+	Query              string         `json:"query,omitempty"`
+	Plan               map[string]any `json:"plan,omitempty"`
+	PlanKind           string         `json:"plan_kind,omitempty"`
+	QuerySource        string         `json:"query_source,omitempty"`
+	ObservedAt         *time.Time     `json:"observed_at,omitempty"`
+	NamesFrom          string         `json:"names_from,omitempty"`
 }
 
 type History struct {
@@ -372,7 +387,8 @@ func (p *Package) addStatement(i detector.Incident, incident string) string {
 	}
 	for _, q := range i.Queries {
 		if d, ok := parseDetails(q); ok && q.Role == "regressed" {
-			s.Query, s.Plan, s.NamesFrom = clip(d.SQL), planText(d.Plan), incident
+			s.Query, s.Plan, s.NamesFrom = d.SQL, d.Plan, incident
+			s.PlanKind, s.QuerySource, s.ObservedAt = d.PlanKind, d.QuerySource, &d.At
 		}
 	}
 	p.Statements = append(p.Statements, s)
@@ -408,8 +424,12 @@ func (p *Package) addLocks(g *collector.BlockingGraph, current bool) {
 		blocked := append([]int{}, children[pid]...)
 		sort.Ints(blocked)
 		s := nodes[pid]
-		l := Lock{ID: fmt.Sprintf("L%d", len(p.Locks)+1), BlockingPID: pid, Root: n < len(roots), BlockingApplication: Clean(s.Application),
-			BlockingState: Clean(s.State), TransactionAgeSeconds: value(s.TransactionAgeSeconds), BlockedPIDs: blocked, BlockedTotal: downstream(pid, children)}
+		observed := s.ObservedAt
+		if observed.IsZero() {
+			observed = g.At
+		}
+		l := Lock{ID: fmt.Sprintf("L%d", len(p.Locks)+1), BlockingPID: pid, Root: n < len(roots), BlockingApplication: s.Application,
+			BlockingState: Clean(s.State), BackendStart: s.BackendStart, QueryStart: s.QueryStart, TransactionStart: s.TransactionStart, ObservedAt: observed, TransactionAgeSeconds: value(s.TransactionAgeSeconds), BlockedPIDs: blocked, BlockedTotal: downstream(pid, children)}
 		if s.WaitEventType != "" {
 			l.BlockingWaitEvent = Clean(s.WaitEventType + ":" + s.WaitEvent)
 		}
@@ -512,7 +532,7 @@ func (p *Package) AddSessions(sessions []collector.Session) {
 		if len(p.Sessions) == maxSessions {
 			return
 		}
-		e := Session{ID: fmt.Sprintf("S%d", len(p.Sessions)+1), PID: s.PID, Application: Clean(s.Application), State: Clean(s.State),
+		e := Session{ID: fmt.Sprintf("S%d", len(p.Sessions)+1), PID: s.PID, Application: s.Application, BackendStart: s.BackendStart, QueryStart: s.QueryStart, TransactionStart: s.TransactionStart, ObservedAt: s.ObservedAt, State: Clean(s.State),
 			QueryAgeSeconds: value(s.QueryAgeSeconds), TransactionAge: value(s.TransactionAgeSeconds)}
 		if s.WaitEventType != "" {
 			e.WaitEvent = Clean(s.WaitEventType + ":" + s.WaitEvent)

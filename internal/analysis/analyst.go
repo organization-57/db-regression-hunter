@@ -67,17 +67,29 @@ func (a *Analyst) Analyze(ctx context.Context, p evidence.Package) Result {
 	start := time.Now()
 	r := NewResult("", p)
 	r.Evidence = &p
+	safe, names, err := p.ForLLM()
+	if err != nil {
+		fallback := Rules(p)
+		r.Status, r.Analysis, r.Reason, r.Error = Fallback, &fallback, "invalid_evidence", "evidence cannot be serialized"
+		finished := time.Now().UTC()
+		r.FinishedAt = &finished
+		return r
+	}
+	if len(safe.MissingSources) > len(p.MissingSources) {
+		p.MissingSources = append(append([]string(nil), p.MissingSources...), safe.MissingSources[len(p.MissingSources):]...)
+	}
 	if a.Deadline > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, a.Deadline)
 		defer cancel()
 	}
-	won, l := a.race(ctx, p)
+	won, l := a.race(ctx, safe)
 	l.mu.Lock()
 	r.Attempts, r.Usage = l.attempts, l.usage
 	l.mu.Unlock()
 	if won.ok {
 		analysis := won.analysis
+		restore(&analysis, names)
 		r.Status, r.Model, r.Analysis, r.Warnings = Done, won.model, &analysis, won.warnings
 	} else {
 		fallback := Rules(p)

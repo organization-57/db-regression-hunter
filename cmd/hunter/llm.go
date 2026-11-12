@@ -91,7 +91,7 @@ func (l *llmLayer) observe(ctx context.Context, s collector.Snapshot, updates []
 		slog.Info("incident analysis", "id", id, "incidents", r.IncidentIDs, "status", r.Status, "reason", r.Reason, "model", r.Model,
 			"latency_ms", r.LatencyMs, "attempts", len(r.Attempts), "error", r.Error)
 		if l.bot != nil && ctx.Err() == nil {
-			if err := l.bot.Send(ctx, telegram.FormatAnalysis(r)); err != nil {
+			if err := l.bot.NotifyAnalysis(ctx, r); err != nil {
 				slog.Warn("analysis notification failed", "error", err)
 			}
 		}

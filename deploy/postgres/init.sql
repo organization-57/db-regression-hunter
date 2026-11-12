@@ -3,5 +3,7 @@ CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 CREATE ROLE hunter LOGIN PASSWORD 'hunter';
 GRANT CONNECT ON DATABASE demo TO hunter;
 GRANT pg_monitor TO hunter;
+-- internal/demo/schema.sql grants DML privileges on demo_shop at each startup.
+-- Read-only is a connection default, not a restriction on the granted privileges.
 ALTER ROLE hunter SET default_transaction_read_only = on;
 ALTER ROLE hunter SET statement_timeout = '5s';

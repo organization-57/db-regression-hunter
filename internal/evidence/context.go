@@ -4,36 +4,70 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/makeev/db-regression-hunter/internal/collector"
 	"github.com/makeev/db-regression-hunter/internal/detector"
 )
 
-const (
-	maxTables  = 6
-	maxIndexes = 6
-	maxHeld    = 6
-	maxQuery   = 1500
-	planLines  = 20
-	aliasNote  = "identifiers are replaced with aliases id_N that are unique only within one incident (names_from); literals and comments are removed"
-)
+const maxTables = 6
+const maxHeld = 6
+
+type Column struct {
+	Name             string   `json:"name"`
+	Type             string   `json:"type"`
+	NotNull          bool     `json:"not_null"`
+	NullFraction     *float64 `json:"null_fraction"`
+	DistinctEstimate *float64 `json:"distinct_estimate"`
+	AverageWidth     *float64 `json:"avg_width"`
+	Correlation      *float64 `json:"correlation"`
+}
+
+type Index struct {
+	Definition string `json:"definition"`
+	Valid      bool   `json:"valid"`
+}
 
 type Table struct {
-	ID                   string   `json:"id"`
-	NamesFrom            string   `json:"names_from"`
-	Name                 string   `json:"table"`
-	EstimatedRows        float64  `json:"estimated_rows"`
-	TotalBytes           float64  `json:"total_bytes"`
-	DeadTuples           float64  `json:"dead_tuples"`
-	ModifiedSinceAnalyze float64  `json:"modifications_since_analyze"`
-	LastAnalyze          string   `json:"last_analyze,omitempty"`
-	Indexes              []string `json:"indexes,omitempty"`
+	ID                   string     `json:"id"`
+	NamesFrom            string     `json:"names_from"`
+	ObservedAt           *time.Time `json:"observed_at,omitempty"`
+	Schema               string     `json:"schema"`
+	Name                 string     `json:"table"`
+	EstimatedRows        float64    `json:"estimated_rows"`
+	HeapBytes            float64    `json:"heap_bytes"`
+	TotalBytes           float64    `json:"total_bytes"`
+	IndexBytes           float64    `json:"index_bytes"`
+	LiveTuples           *float64   `json:"live_tuples"`
+	DeadTuples           *float64   `json:"dead_tuples"`
+	ModifiedSinceAnalyze *float64   `json:"modifications_since_analyze"`
+	LastAnalyze          string     `json:"last_analyze,omitempty"`
+	LastAutoanalyze      string     `json:"last_autoanalyze,omitempty"`
+	LastVacuum           string     `json:"last_vacuum,omitempty"`
+	LastAutovacuum       string     `json:"last_autovacuum,omitempty"`
+	Columns              []Column   `json:"columns"`
+	Indexes              []Index    `json:"indexes"`
+	Constraints          []string   `json:"constraints"`
+	ColumnsTruncated     bool       `json:"columns_truncated,omitempty"`
+	IndexesTruncated     bool       `json:"indexes_truncated,omitempty"`
+	ConstraintsTruncated bool       `json:"constraints_truncated,omitempty"`
+}
+
+func (t Table) QualifiedName() string { return collector.RelationRef(t.Schema, t.Name) }
+
+type HeldLock struct {
+	Mode  string `json:"mode"`
+	Table string `json:"table,omitempty"`
 }
 
 type details struct {
+	At          time.Time      `json:"at"`
 	SQL         string         `json:"sql"`
 	Plan        map[string]any `json:"plan"`
+	PlanKind    string         `json:"plan_kind"`
 	Reasons     []string       `json:"incomplete_reasons"`
 	QuerySource string         `json:"query_source"`
+	TableScope  string         `json:"table_scope"`
 	Locks       []struct {
 		Mode    string `json:"mode"`
 		Granted bool   `json:"granted"`
@@ -43,15 +77,32 @@ type details struct {
 
 func parseDetails(q detector.QueryEvidence) (details, bool) {
 	var d details
-	return d, len(q.Details) > 0 && json.Unmarshal(q.Details, &d) == nil
+	ok := len(q.Details) > 0 && json.Unmarshal(q.Details, &d) == nil
+	return d, ok
+}
+
+type sessionKey struct {
+	pid                         int
+	backend, query, transaction time.Time
+	state                       string
+}
+
+func stamp(t *time.Time) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return t.UTC().Round(0)
+}
+func key(pid int, backend, query, transaction *time.Time, state string) sessionKey {
+	return sessionKey{pid, stamp(backend), stamp(query), stamp(transaction), state}
 }
 
 func (p *Package) addQueryContext(incidents []detector.Incident) {
-	type sessionQuery struct {
+	type observed struct {
 		from string
 		d    details
 	}
-	sessions := map[int]sessionQuery{}
+	sessions := map[sessionKey]observed{}
 	collected := false
 	for n, i := range incidents {
 		from := p.Incidents[n].ID
@@ -64,8 +115,12 @@ func (p *Package) addQueryContext(incidents []detector.Incident) {
 			if len(d.Reasons) > 0 {
 				p.MissingSources = append(p.MissingSources, fmt.Sprintf("SQL context of %s %s is incomplete: %s", from, q.Role, strings.Join(d.Reasons, ", ")))
 			}
-			if _, seen := sessions[q.PID]; q.PID != 0 && !seen {
-				sessions[q.PID] = sessionQuery{from, d}
+			if q.PID == 0 || q.BackendStart == nil || q.QueryStart == nil || d.At.IsZero() {
+				continue
+			}
+			k := key(q.PID, q.BackendStart, q.QueryStart, q.TransactionStart, q.State)
+			if prior, ok := sessions[k]; !ok || prior.d.At.Before(d.At) {
+				sessions[k] = observed{from, d}
 			}
 		}
 		p.addTables(i.Tables, from)
@@ -74,102 +129,58 @@ func (p *Package) addQueryContext(incidents []detector.Incident) {
 		}
 	}
 	for n := range p.Locks {
-		s, ok := sessions[p.Locks[n].BlockingPID]
-		if !ok {
+		l := &p.Locks[n]
+		if l.BackendStart == nil || l.QueryStart == nil {
+			p.MissingSources = append(p.MissingSources, "session identity is incomplete for "+l.ID)
 			continue
 		}
-		l := &p.Locks[n]
-		l.BlockingQuery, l.QuerySource, l.NamesFrom = clip(s.d.SQL), s.d.QuerySource, s.from
+		s, ok := sessions[key(l.BlockingPID, l.BackendStart, l.QueryStart, l.TransactionStart, l.BlockingState)]
+		if !ok {
+			p.MissingSources = append(p.MissingSources, "SQL context does not match the session/query/transaction identity of "+l.ID)
+			continue
+		}
+		if s.d.At.Before(*l.QueryStart) {
+			p.MissingSources = append(p.MissingSources, "SQL context predates query start for "+l.ID)
+			continue
+		}
+		l.BlockingQuery, l.QuerySource, l.NamesFrom = s.d.SQL, s.d.QuerySource, s.from
+		l.QueryObservedAt = &s.d.At
+		l.Plan, l.PlanKind = s.d.Plan, s.d.PlanKind
+		l.TableScope = s.d.TableScope
 		for _, k := range s.d.Locks {
-			if k.Granted && k.Table != "" && len(l.HeldLocks) < maxHeld {
-				l.HeldLocks = append(l.HeldLocks, k.Mode+" on "+k.Table)
+			if k.Granted && k.Table != "" {
+				if len(l.HeldLocks) == maxHeld {
+					p.MissingSources = append(p.MissingSources, "held lock list truncated for "+l.ID)
+					break
+				}
+				l.HeldLocks = append(l.HeldLocks, HeldLock{k.Mode, k.Table})
 			}
 		}
 	}
-	if collected {
-		p.SQLNames = aliasNote
-	} else if len(p.Locks) > 0 || len(p.Statements) > 0 {
+	if !collected && (len(p.Locks) > 0 || len(p.Statements) > 0) {
 		p.MissingSources = append(p.MissingSources, "SQL texts, plans and table metadata were not collected for these incidents")
 	}
 }
 
 func (p *Package) addTables(raw json.RawMessage, from string) {
-	var tables []map[string]any
+	var tables []json.RawMessage
 	if len(raw) == 0 || json.Unmarshal(raw, &tables) != nil {
 		return
 	}
-	for _, t := range tables {
+	for _, data := range tables {
 		if len(p.Tables) == maxTables {
 			p.MissingSources = append(p.MissingSources, fmt.Sprintf("only the first %d tables are included", maxTables))
 			return
 		}
-		e := Table{ID: fmt.Sprintf("T%d", len(p.Tables)+1), NamesFrom: from, Name: text(t, "schema") + "." + text(t, "name"),
-			EstimatedRows: number(t, "estimated_rows"), TotalBytes: number(t, "total_bytes"), DeadTuples: number(t, "dead_tuples"),
-			ModifiedSinceAnalyze: number(t, "modifications_since_analyze"), LastAnalyze: max(text(t, "last_analyze"), text(t, "last_autoanalyze"))}
-		indexes, _ := t["indexes"].([]any)
-		for _, ix := range indexes {
-			if m, ok := ix.(map[string]any); ok && len(e.Indexes) < maxIndexes {
-				e.Indexes = append(e.Indexes, clip(text(m, "definition")))
-			}
+		var t Table
+		var ref struct {
+			Name string `json:"name"`
 		}
-		p.Tables = append(p.Tables, e)
+		if json.Unmarshal(data, &t) != nil || json.Unmarshal(data, &ref) != nil {
+			p.MissingSources = append(p.MissingSources, "table metadata could not be decoded for "+from)
+			continue
+		}
+		t.ID, t.NamesFrom, t.Name = fmt.Sprintf("T%d", len(p.Tables)+1), from, ref.Name
+		p.Tables = append(p.Tables, t)
 	}
-}
-
-func planText(root map[string]any) string {
-	var lines []string
-	var walk func(map[string]any, int)
-	walk = func(n map[string]any, depth int) {
-		if len(lines) > planLines {
-			return
-		}
-		if len(lines) == planLines {
-			lines = append(lines, "…")
-			return
-		}
-		line := strings.Repeat("  ", depth) + text(n, "Node Type")
-		if v := text(n, "Join Type"); v != "" {
-			line += " " + v
-		}
-		if v := text(n, "Relation Name"); v != "" {
-			line += " on " + strings.TrimPrefix(text(n, "Schema")+"."+v, ".")
-		}
-		if v := text(n, "Index Name"); v != "" {
-			line += " using " + v
-		}
-		line += fmt.Sprintf(" (cost=%v rows=%v)", n["Total Cost"], n["Plan Rows"])
-		for _, k := range []string{"Index Cond", "Recheck Cond", "Hash Cond", "Merge Cond", "Join Filter", "Filter"} {
-			if v := text(n, k); v != "" {
-				line += " " + k + ": " + v
-			}
-		}
-		lines = append(lines, line)
-		children, _ := n["Plans"].([]any)
-		for _, c := range children {
-			if m, ok := c.(map[string]any); ok {
-				walk(m, depth+1)
-			}
-		}
-	}
-	if root != nil {
-		walk(root, 0)
-	}
-	return strings.Join(lines, "\n")
-}
-
-func text(m map[string]any, key string) string {
-	s, _ := m[key].(string)
-	return s
-}
-
-func number(m map[string]any, key string) float64 {
-	v, _ := m[key].(float64)
-	return value(v)
-}
-
-func clip(s string) string {
-	if r := []rune(s); len(r) > maxQuery {
-		return string(r[:maxQuery]) + " …"
-	}
-	return s
 }

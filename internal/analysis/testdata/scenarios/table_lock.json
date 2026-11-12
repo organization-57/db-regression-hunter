@@ -4,7 +4,7 @@
   "blocking_ddl"
  ],
  "evidence": {
-  "schema": "hunter.evidence/v4",
+  "schema": "hunter.evidence/v5",
   "incidents": [
    {
     "id": "I1",
@@ -127,7 +127,10 @@
     "blocking_last_query": "lock table \"id_1\" . \"id_2\" in access exclusive mode",
     "blocking_query_source": "last_statement",
     "blocking_held_locks": [
-     "AccessExclusiveLock on id_1.id_2"
+     {
+      "mode": "AccessExclusiveLock",
+      "table": "id_1.id_2"
+     }
     ],
     "names_from": "I1",
     "blocking_transaction_age_seconds": 36.8,
@@ -154,7 +157,10 @@
     "blocking_last_query": "insert into \"id_1\" . \"id_2\" ( \"id_4\" , \"id_5\" , \"id_6\" ) select $1 , '<redacted>' , \"id_7\" from \"id_1\" . \"id_8\" where \"id_9\" = $2 returning \"id_9\"",
     "blocking_query_source": "active_statement",
     "blocking_held_locks": [
-     "RowExclusiveLock on id_1.id_3"
+     {
+      "mode": "RowExclusiveLock",
+      "table": "id_1.id_3"
+     }
     ],
     "names_from": "I1",
     "blocking_transaction_age_seconds": 36,
@@ -221,15 +227,19 @@
    {
     "id": "T1",
     "names_from": "I1",
-    "table": "id_1.id_3",
+    "table": "id_3",
     "estimated_rows": 200,
     "total_bytes": 98304,
     "dead_tuples": 135,
     "modifications_since_analyze": 63,
     "last_analyze": "2026-11-11T16:38:23.897969+00:00",
     "indexes": [
-     "create unique index \"id_13\" on \"id_1\" . \"id_3\" using btree ( \"id_10\" )"
-    ]
+     {
+      "definition": "create unique index \"id_13\" on \"id_1\" . \"id_3\" using btree ( \"id_10\" )",
+      "valid": true
+     }
+    ],
+    "schema": "id_1"
    }
   ],
   "settings": {

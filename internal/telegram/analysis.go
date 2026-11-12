@@ -83,7 +83,7 @@ func fact(p *evidence.Package, id string) string {
 	}
 	for _, t := range p.Tables {
 		if t.ID == id {
-			return fmt.Sprintf("таблица %s: около %g строк, %g МБ, мёртвых строк %g", t.Name, t.EstimatedRows, math.Round(t.TotalBytes/1e5)/10, t.DeadTuples)
+			return fmt.Sprintf("таблица %s: около %g строк, %g МБ, мёртвых строк %s", t.QualifiedName(), t.EstimatedRows, math.Round(t.TotalBytes/1e5)/10, number(t.DeadTuples))
 		}
 	}
 	for _, s := range p.Statements {

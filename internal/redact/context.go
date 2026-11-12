@@ -1,17 +1,22 @@
-package collector
+package redact
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 )
 
-// One dictionary per investigation keeps SQL, plan and catalog names aligned.
-// Neither the dictionary nor original text leaves the collector.
-type anonymizer map[string]string
+// Context is an ephemeral dictionary used only at the LLM boundary.
+type Context map[string]string
 
-func (a anonymizer) name(s string) string {
+func New() Context { return Context{} }
+
+func (a Context) Name(s string) string {
+	if s == "" {
+		return ""
+	}
 	if v, ok := a[s]; ok {
 		return v
 	}
@@ -24,11 +29,11 @@ const sqlWords = " select from where join inner outer left right full cross natu
 
 // Lex SQL rather than applying regexes: comments, escaped strings, quoted names
 // and dollar quotes can all contain secrets and SQL-looking text.
-func (a anonymizer) sql(s string) (string, error) {
+func (a Context) SQL(s string) (string, error) {
 	return a.tokens(s, true)
 }
 
-func (a anonymizer) tokens(s string, redactNumbers bool) (string, error) {
+func (a Context) tokens(s string, redactNumbers bool) (string, error) {
 	if !utf8.ValidString(s) || len(s) > 64*1024 {
 		return "", fmt.Errorf("unsupported_sql")
 	}
@@ -85,7 +90,7 @@ func (a anonymizer) tokens(s string, redactNumbers bool) (string, error) {
 				return "", fmt.Errorf("unsupported_sql")
 			}
 			if c == '"' {
-				out = append(out, `"`+a.name(value.String())+`"`)
+				out = append(out, `"`+a.Name(value.String())+`"`)
 			} else {
 				out = append(out, "'<redacted>'")
 			}
@@ -146,10 +151,22 @@ func (a anonymizer) tokens(s string, redactNumbers bool) (string, error) {
 					i = j
 					continue
 				}
-				if strings.Contains(sqlWords+" create index lock access exclusive share mode ", " "+word+" ") {
+				next := j
+				for next < len(s) && strings.ContainsRune(" \t\r\n", rune(s[next])) {
+					next++
+				}
+				_, known := a[word]
+				grammar := sqlWords[:strings.Index(sqlWords, " integer ")] + sqlWords[strings.Index(sqlWords, " unique primary "):] + " create index lock access exclusive share mode "
+				function := next < len(s) && s[next] == '('
+				typeCast := len(out) > 0 && out[len(out)-1] == "::"
+				if redactNumbers && (word == "true" || word == "false") {
+					out = append(out, "'<redacted>' :: boolean")
+				} else if known && redactNumbers && !strings.Contains(grammar, " "+word+" ") && !function && !typeCast {
+					out = append(out, `"`+a.Name(word)+`"`)
+				} else if strings.Contains(sqlWords+" create index lock access exclusive share mode name inet cidr macaddr macaddr8 bit varbit money tsvector tsquery jsonpath regclass regtype xid xid8 tid pg_lsn ", " "+word+" ") {
 					out = append(out, word)
 				} else {
-					out = append(out, `"`+a.name(word)+`"`)
+					out = append(out, `"`+a.Name(word)+`"`)
 				}
 				i = j
 			} else if strings.ContainsRune("+-/%<>=!~^|&:#?", r) {
@@ -168,4 +185,94 @@ func (a anonymizer) tokens(s string, redactNumbers bool) (string, error) {
 		}
 	}
 	return strings.Join(out, " "), nil
+}
+
+func (a Context) Type(s string) (string, error) { return a.tokens(s, false) }
+
+// Explicit fields only: EXPLAIN extensions can add arbitrary strings. Expressions
+// go through the same lexer as SQL; unknown fields never pass through unchanged.
+func (a Context) Plan(node map[string]any) map[string]any {
+	var seed func(map[string]any)
+	seed = func(n map[string]any) {
+		for _, key := range []string{"Schema", "Relation Name", "Index Name", "Alias", "CTE Name"} {
+			if s, ok := n[key].(string); ok {
+				a.Name(s)
+			}
+		}
+		if children, ok := n["Plans"].([]any); ok {
+			for _, child := range children {
+				if c, ok := child.(map[string]any); ok {
+					seed(c)
+				}
+			}
+		}
+	}
+	seed(node)
+	return a.plan(node)
+}
+
+func (a Context) plan(node map[string]any) map[string]any {
+	out := map[string]any{}
+	keys := make([]string, 0, len(node))
+	for k := range node {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := node[k]
+		switch k {
+		case "Startup Cost", "Total Cost", "Plan Rows", "Plan Width", "Workers Planned", "Parallel Aware", "Async Capable", "Inner Unique":
+			switch v.(type) {
+			case float64, bool:
+				out[k] = v
+			}
+		case "Relation Name", "Schema", "Alias", "Index Name", "CTE Name":
+			if s, ok := v.(string); ok {
+				out[k] = a.Name(s)
+			}
+		case "Node Type", "Join Type", "Strategy", "Partial Mode", "Scan Direction", "Parent Relationship", "Operation":
+			if s, ok := v.(string); ok {
+				// Names of custom scan providers/node types are not trusted.
+				const enums = "|Seq Scan|Index Scan|Index Only Scan|Bitmap Heap Scan|Bitmap Index Scan|BitmapAnd|BitmapOr|Tid Scan|Tid Range Scan|Nested Loop|Hash Join|Merge Join|Hash|Sort|Incremental Sort|Aggregate|Group|Limit|Result|Append|Merge Append|Gather|Gather Merge|Materialize|Memoize|Unique|WindowAgg|Subquery Scan|CTE Scan|WorkTable Scan|Function Scan|Values Scan|Recursive Union|SetOp|LockRows|ModifyTable|Foreign Scan|Custom Scan|Sample Scan|Inner|Left|Right|Full|Semi|Anti|Plain|Sorted|Hashed|Mixed|Simple|Partial|Finalize|Forward|Backward|NoMovement|Outer|Member|Subquery|InitPlan|SubPlan|Insert|Update|Delete|Merge|"
+				if strings.Contains(enums, "|"+s+"|") {
+					out[k] = s
+				} else {
+					out[k] = "redacted"
+				}
+			}
+		case "Filter", "Index Cond", "Recheck Cond", "Hash Cond", "Merge Cond", "Join Filter", "One-Time Filter", "Function Call":
+			if s, ok := v.(string); ok {
+				if safe, err := a.SQL(s); err == nil {
+					out[k] = safe
+				} else {
+					out[k] = "redacted"
+				}
+			}
+		case "Output", "Sort Key", "Group Key", "Hash Key", "Presorted Key", "Cache Key":
+			if list, ok := v.([]any); ok {
+				safe := []string{}
+				for _, item := range list {
+					if s, ok := item.(string); ok {
+						if x, err := a.SQL(s); err == nil {
+							safe = append(safe, x)
+						} else {
+							safe = append(safe, "redacted")
+						}
+					}
+				}
+				out[k] = safe
+			}
+		case "Plans":
+			if list, ok := v.([]any); ok {
+				children := []map[string]any{}
+				for _, item := range list {
+					if n, ok := item.(map[string]any); ok {
+						children = append(children, a.plan(n))
+					}
+				}
+				out[k] = children
+			}
+		}
+	}
+	return out
 }

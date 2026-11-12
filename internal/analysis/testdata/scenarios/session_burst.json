@@ -5,7 +5,7 @@
   "slow_query"
  ],
  "evidence": {
-  "schema": "hunter.evidence/v4",
+  "schema": "hunter.evidence/v5",
   "incidents": [
    {
     "id": "I1",

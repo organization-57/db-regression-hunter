@@ -35,6 +35,10 @@ func (b *Bot) call(ctx context.Context, method string, payload any, result any) 
 		return fmt.Errorf("build Telegram request")
 	}
 	req.Header.Set("Content-Type", "application/json")
+	return b.do(req, result)
+}
+
+func (b *Bot) do(req *http.Request, result any) error {
 	resp, err := b.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("Telegram transport failed")
@@ -68,7 +72,13 @@ func (b *Bot) sendHTML(ctx context.Context, message string) error {
 }
 
 func (b *Bot) Notify(ctx context.Context, i detector.Incident) error {
-	return b.sendHTML(ctx, b.IncidentSummary(i))
+	if err := b.sendHTML(ctx, b.IncidentSummary(i)); err != nil {
+		return err
+	}
+	if len(i.Queries) > 0 || len(i.Tables) > 0 {
+		return b.SendDocument(ctx, "incident-"+i.ID+".json", i)
+	}
+	return nil
 }
 
 func (b *Bot) Run(ctx context.Context, status func() string, latest func() string) {
@@ -187,6 +197,23 @@ func FormatIncident(i detector.Incident) string {
 			}
 		}
 	}
+	for n, q := range i.Queries {
+		if n == 2 {
+			break
+		}
+		var d struct {
+			SQL    string `json:"sql"`
+			Source string `json:"query_source"`
+		}
+		if json.Unmarshal(q.Details, &d) == nil && d.SQL != "" {
+			text := []rune(d.SQL)
+			if len(text) > 500 {
+				text = append(text[:500], []rune("… (полностью в JSON)")...)
+			}
+			fmt.Fprintf(&b, "\nSQL %s · PID %d · %s:\n%s\n", q.Role, q.PID, d.Source, string(text))
+		}
+	}
+
 	fmt.Fprintf(&b, "\nВосстановление: %d/%d; пропусков: %d", i.Recovery.NormalSamples, i.Recovery.RequiredSamples, i.DataGaps)
 	if i.ResolvedAt != nil {
 		fmt.Fprintf(&b, "\nВосстановление подтверждено: %s", formatTime(*i.ResolvedAt))

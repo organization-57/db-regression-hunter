@@ -1,11 +1,13 @@
 CREATE SCHEMA IF NOT EXISTS demo_shop;
 
--- EXPLAIN requires access to referenced tables even without ANALYZE.
+-- Demo only: EXPLAIN of DML requires the corresponding table privileges.
 DO $$ BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='hunter') THEN
         GRANT USAGE ON SCHEMA demo_shop TO hunter;
-        ALTER DEFAULT PRIVILEGES IN SCHEMA demo_shop GRANT SELECT ON TABLES TO hunter;
-        GRANT SELECT ON ALL TABLES IN SCHEMA demo_shop TO hunter;
+        ALTER DEFAULT PRIVILEGES IN SCHEMA demo_shop GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO hunter;
+        ALTER DEFAULT PRIVILEGES IN SCHEMA demo_shop GRANT USAGE ON SEQUENCES TO hunter;
+        GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA demo_shop TO hunter;
+        GRANT USAGE ON ALL SEQUENCES IN SCHEMA demo_shop TO hunter;
     END IF;
 END $$;
 
