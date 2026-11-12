@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="340" viewBox="0 0 1100 340" role="img" aria-labelledby="title desc">
+<title id="title">Как проходит расследование</title><desc id="desc">Go обнаруживает деградацию и собирает факты. Контекст обезличивается перед отправкой LLM. Проверенный ответ и исходные данные доступны разработчику.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10Z" fill="#64748b"/></marker></defs>
+<rect width="1100" height="340" rx="24" fill="#f8fafc"/>
+<g font-family="Arial, Helvetica, sans-serif">
+<text x="28" y="42" font-size="24" fill="#0f172a" font-weight="700" text-anchor="start">От сигнала к следующему действию</text>
+<path d="M273 161H292" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<path d="M539 161H558" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<path d="M805 161H824" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<rect x="28" y="86" width="245" height="166" rx="16" fill="#eef2ff" stroke="#a5b4fc" stroke-width="1.5"/>
+<text x="48" y="119" font-size="19" fill="#0f172a" font-weight="700" text-anchor="start">01 / Обнаружить</text>
+<text x="48" y="145" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Метрики → baseline</text>
+<text x="48" y="167" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Устойчивое отклонение</text>
+<text x="48" y="189" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Граф блокировок</text>
+<text x="48" y="211" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Go определяет факты</text>
+<rect x="294" y="86" width="245" height="166" rx="16" fill="#eef2ff" stroke="#a5b4fc" stroke-width="1.5"/>
+<text x="314" y="119" font-size="19" fill="#0f172a" font-weight="700" text-anchor="start">02 / Собрать контекст</text>
+<text x="314" y="145" font-size="14" fill="#475569" font-weight="400" text-anchor="start">SQL + EXPLAIN + схема</text>
+<text x="314" y="167" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Статистика до / после</text>
+<text x="314" y="189" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Общие псевдонимы</text>
+<text x="314" y="211" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Литералы удаляются</text>
+<rect x="560" y="86" width="245" height="166" rx="16" fill="#faf5ff" stroke="#d8b4fe" stroke-width="1.5"/>
+<text x="580" y="119" font-size="19" fill="#0f172a" font-weight="700" text-anchor="start">03 / Объяснить</text>
+<text x="580" y="145" font-size="14" fill="#475569" font-weight="400" text-anchor="start">LLM связывает симптомы</text>
+<text x="580" y="167" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Предлагает причину</text>
+<text x="580" y="189" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Действия и проверки</text>
+<text x="580" y="211" font-size="14" fill="#475569" font-weight="400" text-anchor="start">При отказе — правила</text>
+<rect x="826" y="86" width="245" height="166" rx="16" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1.5"/>
+<text x="846" y="119" font-size="19" fill="#0f172a" font-weight="700" text-anchor="start">04 / Проверить</text>
+<text x="846" y="145" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Go валидирует ответ</text>
+<text x="846" y="167" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Возвращает имена локально</text>
+<text x="846" y="189" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Telegram + JSON + Grafana</text>
+<text x="846" y="211" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Разработчик решает</text>
+<text x="28" y="292" font-size="15" fill="#475569" font-weight="400" text-anchor="start">Детектор работает без LLM. Предложенные изменения не выполняются автоматически.</text>
+<text x="28" y="317" font-size="14" fill="#475569" font-weight="400" text-anchor="start">После нормализации метрик: open → recovering → resolved.</text>
+</g></svg>

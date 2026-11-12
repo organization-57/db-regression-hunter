@@ -1,71 +1,62 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="640" viewBox="0 0 1200 640" role="img" aria-labelledby="title description">
-<title id="title">Архитектура DB Regression Hunter</title>
-<desc id="description">PostgreSQL передаёт статистику Go-сервису. Сервис обнаруживает деградацию и отправляет расследование в Telegram. Prometheus хранит метрики для Grafana. LLM API (Gonka) объясняет доказательства.</desc>
-<defs>
-  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/></marker>
-  <marker id="purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#9333ea"/></marker>
-</defs>
-<rect width="1200" height="640" rx="20" fill="#f8fafc"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="580" viewBox="0 0 1100 580" role="img" aria-labelledby="title desc">
+<title id="title">Архитектура DB Regression Hunter</title><desc id="desc">Демо нагружает PostgreSQL. Hunter собирает статистику, обнаруживает инциденты и отправляет отчёты в Telegram. Prometheus и Grafana показывают метрики. Для объяснения используется опциональная LLM с обезличенным контекстом.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10Z" fill="#64748b"/></marker></defs>
+<rect width="1100" height="580" rx="24" fill="#f8fafc"/>
 <g font-family="Arial, Helvetica, sans-serif">
-<text x="40" y="48" fill="#0f172a" font-size="26" font-weight="700">DB Regression Hunter</text>
-<text x="40" y="77" fill="#475569" font-size="16">От статистики PostgreSQL к проверяемой гипотезе и следующему действию</text>
-<rect x="250" y="120" width="690" height="220" rx="18" fill="#eef2ff" stroke="#c7d2fe" stroke-width="2"/>
-<text x="276" y="155" fill="#4338ca" font-size="16" font-weight="700">GO-СЕРВИС</text>
-
-<path d="M 210 235 H 280" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
-<text x="245" y="181" fill="#64748b" font-size="13" text-anchor="middle">read-only SQL</text>
-<path d="M 450 235 H 510" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
-<path d="M 680 235 H 740" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
-<path d="M 910 235 H 990" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
-<text x="950" y="220" fill="#64748b" font-size="13" text-anchor="middle">отчёт</text>
-<path d="M 365 280 V 430" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
-<text x="405" y="388" fill="#64748b" font-size="13" text-anchor="middle">/metrics</text>
-<path d="M 450 475 H 510" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
-<path d="M 680 475 H 705 V 570 H 1075 V 520" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
-<text x="885" y="592" fill="#64748b" font-size="13" text-anchor="middle">графики</text>
-<path d="M 1075 280 V 430" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
-<text x="1075" y="388" fill="#64748b" font-size="13" text-anchor="middle">алерты и команды</text>
-<path d="M 595 280 V 380 H 780 V 430" fill="none" stroke="#9333ea" stroke-width="2" stroke-linejoin="round" stroke-dasharray="6 5" marker-end="url(#purple)"/>
-<text x="685" y="367" fill="#9333ea" font-size="13" text-anchor="middle">пакет доказательств</text>
-<path d="M 860 430 V 280" fill="none" stroke="#9333ea" stroke-width="2" stroke-linejoin="round" stroke-dasharray="6 5" marker-end="url(#purple)"/>
-<text x="900" y="408" fill="#9333ea" font-size="13" text-anchor="middle">объяснение</text>
-<rect x="40" y="190" width="170" height="90" rx="12" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.5"/>
-<text x="125" y="220" text-anchor="middle" fill="#0c4a6e" font-size="17" font-weight="700">PostgreSQL</text>
-<text x="125" y="243" text-anchor="middle" fill="#0c4a6e" font-size="13">Наблюдаемая БД</text>
-<path d="M 125 430 V 280" fill="none" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
-<text x="176" y="388" fill="#64748b" font-size="13" text-anchor="middle">нагрузка</text>
-<rect x="40" y="430" width="170" height="90" rx="12" fill="#fff7ed" stroke="#f59e0b" stroke-width="1.5"/>
-<text x="125" y="460" text-anchor="middle" fill="#78350f" font-size="17" font-weight="700">Демо-магазин</text>
-<text x="125" y="483" text-anchor="middle" fill="#78350f" font-size="13">Покупки и чтения</text>
-<text x="125" y="501" text-anchor="middle" fill="#78350f" font-size="13">Инциденты по циклу</text>
-<rect x="280" y="190" width="170" height="90" rx="12" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
-<text x="365" y="220" text-anchor="middle" fill="#312e81" font-size="17" font-weight="700">Сбор метрик</text>
-<text x="365" y="243" text-anchor="middle" fill="#312e81" font-size="13">Снимки и граф ожиданий</text>
-<rect x="510" y="190" width="170" height="90" rx="12" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
-<text x="595" y="220" text-anchor="middle" fill="#312e81" font-size="17" font-weight="700">Детектор</text>
-<text x="595" y="243" text-anchor="middle" fill="#312e81" font-size="13">Baseline и отклонения</text>
-<text x="595" y="261" text-anchor="middle" fill="#312e81" font-size="13">Правила и факты</text>
-<rect x="740" y="190" width="170" height="90" rx="12" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
-<text x="825" y="220" text-anchor="middle" fill="#312e81" font-size="17" font-weight="700">Расследование</text>
-<text x="825" y="243" text-anchor="middle" fill="#312e81" font-size="13">Корневые PID и факты</text>
-<text x="825" y="261" text-anchor="middle" fill="#312e81" font-size="13">Восстановление</text>
-<rect x="990" y="190" width="170" height="90" rx="12" fill="#fff7ed" stroke="#f59e0b" stroke-width="1.5"/>
-<text x="1075" y="220" text-anchor="middle" fill="#78350f" font-size="17" font-weight="700">Telegram</text>
-<text x="1075" y="243" text-anchor="middle" fill="#78350f" font-size="13">Уведомления</text>
-<text x="1075" y="261" text-anchor="middle" fill="#78350f" font-size="13">Статус и история</text>
-<rect x="280" y="430" width="170" height="90" rx="12" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
-<text x="365" y="460" text-anchor="middle" fill="#064e3b" font-size="17" font-weight="700">Prometheus</text>
-<text x="365" y="483" text-anchor="middle" fill="#064e3b" font-size="13">История метрик</text>
-<rect x="510" y="430" width="170" height="90" rx="12" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
-<text x="595" y="460" text-anchor="middle" fill="#064e3b" font-size="17" font-weight="700">Grafana</text>
-<text x="595" y="483" text-anchor="middle" fill="#064e3b" font-size="13">Графики и дашборды</text>
-<rect x="740" y="430" width="170" height="90" rx="12" fill="#faf5ff" stroke="#a855f7" stroke-width="1.5" stroke-dasharray="6 5"/>
-<text x="825" y="460" text-anchor="middle" fill="#581c87" font-size="17" font-weight="700">LLM API</text>
-<text x="825" y="483" text-anchor="middle" fill="#581c87" font-size="13">Интерпретация фактов</text>
-<text x="825" y="501" text-anchor="middle" fill="#581c87" font-size="13">Gonka AI</text>
-<rect x="990" y="430" width="170" height="90" rx="12" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
-<text x="1075" y="460" text-anchor="middle" fill="#0f172a" font-size="17" font-weight="700">Разработчик</text>
-<text x="1075" y="483" text-anchor="middle" fill="#0f172a" font-size="13">Проверяет гипотезу</text>
-<text x="1075" y="501" text-anchor="middle" fill="#0f172a" font-size="13">Принимает решение</text>
-<text x="40" y="618" fill="#64748b" font-size="13">Сплошные связи — текущий контур. Пунктир — необязательная интеграция LLM (включается GONKA_API_KEY).</text>
+<text x="32" y="44" font-size="27" fill="#0f172a" font-weight="700" text-anchor="start">DB Regression Hunter</text>
+<text x="32" y="72" font-size="16" fill="#475569" font-weight="400" text-anchor="start">Один сервис расследует · Telegram объясняет · Grafana показывает</text>
+<path d="M240 245H300" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<path d="M800 245H860" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<path d="M140 400V300" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<path d="M400 345V400" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<path d="M500 455H600" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<path d="M760 345V370H960V400" fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)" marker-start="url(#arrow)" stroke-dasharray="6 5"/>
+<text x="270" y="224" font-size="13" fill="#475569" font-weight="400" text-anchor="middle">SQL</text>
+<text x="830" y="224" font-size="13" fill="#475569" font-weight="400" text-anchor="middle">алерт</text>
+<text x="153" y="358" font-size="13" fill="#475569" font-weight="400" text-anchor="start">нагрузка</text>
+<text x="412" y="380" font-size="13" fill="#475569" font-weight="400" text-anchor="start">/metrics</text>
+<text x="550" y="435" font-size="13" fill="#475569" font-weight="400" text-anchor="middle">метрики</text>
+<text x="880" y="361" font-size="13" fill="#475569" font-weight="400" text-anchor="middle">обезличенный контекст ↔ ответ</text>
+<rect x="40" y="190" width="200" height="110" rx="16" fill="#e0f2fe" stroke="#7dd3fc" stroke-width="1.5"/>
+<text x="60" y="223" font-size="19" fill="#0f172a" font-weight="700" text-anchor="start">PostgreSQL</text>
+<text x="60" y="249" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Статистика и сессии</text>
+<text x="60" y="271" font-size="14" fill="#475569" font-weight="400" text-anchor="start">SQL, планы, каталоги</text>
+<rect x="300" y="125" width="500" height="220" rx="20" fill="#eef2ff" stroke="#a5b4fc" stroke-width="1.5"/>
+<text x="324" y="160" font-size="15" fill="#4338ca" font-weight="700" text-anchor="start">HUNTER / GO</text>
+<rect x="320" y="181" width="145" height="138" rx="16" fill="#ffffff" stroke="#c7d2fe" stroke-width="1.5"/>
+<text x="340" y="214" font-size="19" fill="#0f172a" font-weight="700" text-anchor="start">Сбор</text>
+<text x="340" y="240" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Метрики</text>
+<text x="340" y="262" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Контекст SQL</text>
+<text x="340" y="284" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Схема таблиц</text>
+<rect x="477" y="181" width="145" height="138" rx="16" fill="#ffffff" stroke="#c7d2fe" stroke-width="1.5"/>
+<text x="497" y="214" font-size="19" fill="#0f172a" font-weight="700" text-anchor="start">Детектор</text>
+<text x="497" y="240" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Baseline</text>
+<text x="497" y="262" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Граф ожиданий</text>
+<text x="497" y="284" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Восстановление</text>
+<rect x="634" y="181" width="145" height="138" rx="16" fill="#ffffff" stroke="#c7d2fe" stroke-width="1.5"/>
+<text x="654" y="214" font-size="19" fill="#0f172a" font-weight="700" text-anchor="start">Анализ</text>
+<text x="654" y="240" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Доказательства</text>
+<text x="654" y="262" font-size="14" fill="#475569" font-weight="400" text-anchor="start">LLM + проверка</text>
+<text x="654" y="284" font-size="14" fill="#475569" font-weight="400" text-anchor="start">HTTP API</text>
+<rect x="860" y="190" width="200" height="110" rx="16" fill="#fff7ed" stroke="#fdba74" stroke-width="1.5"/>
+<text x="880" y="223" font-size="19" fill="#0f172a" font-weight="700" text-anchor="start">Telegram</text>
+<text x="880" y="249" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Алерт → разбор</text>
+<text x="880" y="271" font-size="14" fill="#475569" font-weight="400" text-anchor="start">SQL и полный JSON</text>
+<rect x="40" y="400" width="200" height="110" rx="16" fill="#fff7ed" stroke="#fdba74" stroke-width="1.5"/>
+<text x="60" y="433" font-size="19" fill="#0f172a" font-weight="700" text-anchor="start">Demo-магазин</text>
+<text x="60" y="459" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Покупки и чтения</text>
+<text x="60" y="481" font-size="14" fill="#475569" font-weight="400" text-anchor="start">7 сценариев сбоев</text>
+<rect x="300" y="400" width="200" height="110" rx="16" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1.5"/>
+<text x="320" y="433" font-size="19" fill="#0f172a" font-weight="700" text-anchor="start">Prometheus</text>
+<text x="320" y="459" font-size="14" fill="#475569" font-weight="400" text-anchor="start">История метрик</text>
+<text x="320" y="481" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Сбор из Hunter</text>
+<rect x="600" y="400" width="200" height="110" rx="16" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1.5"/>
+<text x="620" y="433" font-size="19" fill="#0f172a" font-weight="700" text-anchor="start">Grafana</text>
+<text x="620" y="459" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Готовый дашборд</text>
+<text x="620" y="481" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Метрики до и после</text>
+<rect x="860" y="400" width="200" height="110" rx="16" fill="#faf5ff" stroke="#d8b4fe" stroke-width="1.5"/>
+<text x="880" y="433" font-size="19" fill="#0f172a" font-weight="700" text-anchor="start">Gonka / LLM</text>
+<text x="880" y="459" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Гипотеза и действия</text>
+<text x="880" y="481" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Опциональный API</text>
+<text x="32" y="553" font-size="14" fill="#475569" font-weight="400" text-anchor="start">Docker Compose: hunter · demo · postgres · prometheus · grafana</text>
 </g></svg>
