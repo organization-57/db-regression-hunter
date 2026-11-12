@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"html"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -103,7 +102,7 @@ func (l *llmLayer) withAnalysis(text, incidentID string) string {
 		return text
 	}
 	if r, ok := l.results.ForIncident(incidentID); ok {
-		text += "\n\n" + html.EscapeString(telegram.LimitText(telegram.FormatAnalysis(r), telegramAnalysisText))
+		text += "\n\n" + telegram.AnalysisCard(r, telegramAnalysisText)
 	}
 	return text
 }

@@ -1,7 +1,6 @@
 package analysis
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/makeev/db-regression-hunter/internal/evidence"
@@ -70,9 +69,6 @@ func TestRulesExplainEachScenarioWithinTheContract(t *testing.T) {
 		}
 		if got := a.Recommendations[0].SQL; got != c.sql || (got != "" && !a.Recommendations[0].RequiresApproval) {
 			t.Errorf("%s: recommendation SQL %q approval %v", c.name, got, a.Recommendations[0].RequiresApproval)
-		}
-		if !strings.Contains(strings.Join(a.Assumptions, " "), "без LLM") {
-			t.Errorf("%s: the answer must say it was made without the model", c.name)
 		}
 	}
 }

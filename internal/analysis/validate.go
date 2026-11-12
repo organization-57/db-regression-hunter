@@ -4,12 +4,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/makeev/db-regression-hunter/internal/evidence"
 )
+
+const (
+	maxCauses          = 3
+	maxRecommendations = 3
+	maxChecks          = 2
+	maxNotes           = 2
+	titleLimit         = 100
+	explanationLimit   = 220
+	actionLimit        = 120
+)
+
+var evidenceRef = regexp.MustCompile(`\b[IMLQST][0-9]+\b`)
 
 type validation struct {
 	errors   []string
@@ -40,9 +54,6 @@ func check(a *Analysis, p evidence.Package) validation {
 	var v validation
 	known := p.IDs()
 	roots := p.RootPIDs()
-	if strings.TrimSpace(a.Summary) == "" {
-		v.errors = append(v.errors, "summary is empty")
-	}
 	if len(a.RootCauses) == 0 {
 		v.errors = append(v.errors, "root_causes is empty")
 	}
@@ -57,6 +68,8 @@ func check(a *Analysis, p evidence.Package) validation {
 		if strings.TrimSpace(c.Title) == "" || strings.TrimSpace(c.Explanation) == "" {
 			v.errors = append(v.errors, where+": title and explanation are required")
 		}
+		v.prose(where+".title", c.Title, titleLimit)
+		v.prose(where+".explanation", c.Explanation, explanationLimit)
 		if c.Confidence < 0 || c.Confidence > 1 || math.IsNaN(c.Confidence) {
 			v.errors = append(v.errors, fmt.Sprintf("%s: confidence %v is outside 0..1", where, c.Confidence))
 		}
@@ -89,6 +102,10 @@ func check(a *Analysis, p evidence.Package) validation {
 	var recs []Recommendation
 	for i, r := range a.Recommendations {
 		where := fmt.Sprintf("recommendations[%d]", i)
+		if len(recs) == maxRecommendations {
+			v.warnings = append(v.warnings, fmt.Sprintf("only the first %d recommendations are kept", maxRecommendations))
+			break
+		}
 		if r.SQL != "" && !targetsKnownSessions(r.SQL, roots) {
 			v.warnings = append(v.warnings, where+" dropped: it terminates or cancels a session that is not a current root blocker")
 			continue
@@ -96,6 +113,7 @@ func check(a *Analysis, p evidence.Package) validation {
 		if strings.TrimSpace(r.Action) == "" {
 			v.errors = append(v.errors, where+": action is empty")
 		}
+		v.prose(where+".action", r.Action, actionLimit)
 		if strings.TrimSpace(r.Verify) == "" {
 			v.errors = append(v.errors, where+": verify is empty: say which metric shows the effect")
 		}
@@ -121,7 +139,28 @@ func check(a *Analysis, p evidence.Package) validation {
 	if len(a.Recommendations) == 0 {
 		v.errors = append(v.errors, "recommendations is empty or every recommendation targeted sessions outside the evidence")
 	}
+	a.RootCauses = keep(&v, "root_causes", a.RootCauses, maxCauses)
+	a.Checks = keep(&v, "checks", a.Checks, maxChecks)
+	a.Assumptions = keep(&v, "assumptions", a.Assumptions, maxNotes)
+	a.MissingData = keep(&v, "missing_data", a.MissingData, maxNotes)
 	return v
+}
+
+func (v *validation) prose(where, text string, limit int) {
+	if n := utf8.RuneCountInString(text); n > 2*limit {
+		v.errors = append(v.errors, fmt.Sprintf("%s has %d characters; keep it under %d", where, n, limit))
+	}
+	if ref := evidenceRef.FindString(text); ref != "" {
+		v.errors = append(v.errors, fmt.Sprintf("%s names the evidence id %s; write the fact in words and keep ids only in evidence", where, ref))
+	}
+}
+
+func keep[T any](v *validation, field string, items []T, limit int) []T {
+	if len(items) <= limit {
+		return items
+	}
+	v.warnings = append(v.warnings, fmt.Sprintf("only the first %d %s are kept", limit, field))
+	return items[:limit]
 }
 
 func foreignText(a *Analysis) string {

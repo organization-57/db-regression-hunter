@@ -10,15 +10,21 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/makeev/db-regression-hunter/internal/detector"
 )
 
+const rememberedAlerts = 256
+
 type Bot struct {
 	token, chatID, grafanaURL string
 	client                    *http.Client
 	Annotate                  func(text, incidentID string) string
+	mu                        sync.Mutex
+	alerts                    map[string]int64
+	alertOrder                []string
 }
 
 func New(token, chatID, grafanaURL string) *Bot {
@@ -57,7 +63,7 @@ func (b *Bot) do(req *http.Request, result any) error {
 	if !envelope.OK {
 		return fmt.Errorf("Telegram rejected request")
 	}
-	if result != nil {
+	if result != nil && len(envelope.Result) > 0 {
 		return json.Unmarshal(envelope.Result, result)
 	}
 	return nil
@@ -68,13 +74,56 @@ func (b *Bot) Send(ctx context.Context, message string) error {
 }
 
 func (b *Bot) sendHTML(ctx context.Context, message string) error {
-	return b.call(ctx, "sendMessage", map[string]any{"chat_id": b.chatID, "text": message, "parse_mode": "HTML", "link_preview_options": map[string]bool{"is_disabled": true}}, nil)
+	_, err := b.post(ctx, message, 0)
+	return err
+}
+
+func (b *Bot) post(ctx context.Context, message string, replyTo int64) (int64, error) {
+	payload := map[string]any{"chat_id": b.chatID, "text": message, "parse_mode": "HTML", "link_preview_options": map[string]bool{"is_disabled": true}}
+	if replyTo != 0 {
+		payload["reply_parameters"] = map[string]any{"message_id": replyTo, "allow_sending_without_reply": true}
+	}
+	var sent struct {
+		MessageID int64 `json:"message_id"`
+	}
+	err := b.call(ctx, "sendMessage", payload, &sent)
+	return sent.MessageID, err
+}
+
+func (b *Bot) remember(incidentID string, messageID int64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if messageID == 0 || b.alerts[incidentID] != 0 {
+		return
+	}
+	if b.alerts == nil {
+		b.alerts = map[string]int64{}
+	}
+	if len(b.alertOrder) == rememberedAlerts {
+		delete(b.alerts, b.alertOrder[0])
+		b.alertOrder = b.alertOrder[1:]
+	}
+	b.alerts[incidentID] = messageID
+	b.alertOrder = append(b.alertOrder, incidentID)
+}
+
+func (b *Bot) alertFor(incidentIDs []string) int64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, id := range incidentIDs {
+		if m := b.alerts[id]; m != 0 {
+			return m
+		}
+	}
+	return 0
 }
 
 func (b *Bot) Notify(ctx context.Context, i detector.Incident) error {
-	if err := b.sendHTML(ctx, b.IncidentSummary(i)); err != nil {
+	messageID, err := b.post(ctx, b.IncidentSummary(i), 0)
+	if err != nil {
 		return err
 	}
+	b.remember(i.ID, messageID)
 	if len(i.Queries) > 0 || len(i.Tables) > 0 {
 		return b.SendDocument(ctx, "incident-"+i.ID+".json", i)
 	}

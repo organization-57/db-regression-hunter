@@ -41,7 +41,7 @@ func (b *Bot) SendDocument(ctx context.Context, filename string, value any) erro
 }
 
 func (b *Bot) NotifyAnalysis(ctx context.Context, r analysis.Result) error {
-	if err := b.Send(ctx, FormatAnalysis(r)); err != nil {
+	if _, err := b.post(ctx, FormatAnalysis(r), b.alertFor(r.IncidentIDs)); err != nil {
 		return err
 	}
 	if r.Evidence != nil {

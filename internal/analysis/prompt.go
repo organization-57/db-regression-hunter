@@ -10,19 +10,53 @@ import (
 )
 
 const answerShape = `{
-  "summary": "one or two sentences: what happened and the most likely root cause",
   "root_causes": [
-    {"category": "<category>", "title": "short name", "explanation": "how the cited facts show it",
+    {"category": "<category>", "title": "the cause as one statement", "explanation": "the facts that prove it and rule out the nearest alternative",
      "confidence": 0.0, "evidence": ["L1", "M3"]}
   ],
-  "checks": [{"step": "what to look at", "sql": "read-only SELECT, optional", "expect": "what confirms the cause"}],
   "recommendations": [
-    {"action": "concrete fix", "priority": "now|next|later", "risk": "low|medium|high", "sql": "optional",
-     "verify": "which metric (by evidence id) must return to which level", "evidence": ["L1"], "requires_approval": true}
+    {"action": "a fix that starts with a verb", "priority": "now|next|later", "risk": "low|medium|high", "sql": "optional",
+     "verify": "the observable effect, in words", "evidence": ["L1"], "requires_approval": true}
   ],
+  "checks": [{"step": "what to look at", "sql": "read-only SELECT, optional", "expect": "what confirms the cause"}],
   "assumptions": ["what is inferred rather than shown by the data"],
   "missing_data": ["which data would confirm or reject the conclusion"]
 }`
+
+const writingGuide = `The reader is an on-call developer who has already received the detector's alert with the symptoms and opens
+your answer on a phone. In ten seconds they must see why it broke and what to do first. The answer is shown as:
+"Причина: <title>", "Почему: <explanation>", then the recommendations; everything else is folded away.
+- Write in Russian: short plain sentences, no introductory phrases such as "это указывает на", "это говорит о" or
+  "следует отметить". Keep PostgreSQL names as they are (idle in transaction, AccessExclusiveLock, Lock:relation,
+  work_mem, pg_sleep); write everything else in Russian ("коммиты в секунду", not "rate commits").
+- Never write evidence ids (I1, M3, L1, S2, Q1, T1) or metric names (lock_waiting_sessions, temp_bytes_per_second)
+  in text fields: ids belong only in the evidence arrays. Name a fact in words with its value: "ожидающих
+  блокировку нет", "временные файлы 1.6 МБ/с", "транзакция простаивает 37 с".
+- Say every fact once. Do not retell the symptoms: the reader has seen them in the alert.
+- root_causes[0].title: the cause as one statement, who or what and the mechanism, at most 100 characters; no
+  numbers except PIDs. Name the cause, not the symptom: "приложение держит соединения в pg_sleep", not "восемь
+  сессий выполняются по 42 секунды".
+- An application name is pg_stat_activity.application_name, not a database role: never use it in ALTER ROLE.
+- root_causes[0].explanation: the decisive facts with their values and why the nearest alternative cause is ruled
+  out, at most 220 characters; do not repeat the title.
+- Further root causes are alternatives: a title and a confidence; explanation at most 120 characters.
+- recommendations: 1 to 3, the first one is what to do now. action starts with a verb, at most 120 characters. A
+  fix must follow from the facts; a guess ("если это retry-логика...") belongs in assumptions. verify: at most 80
+  characters.
+- checks: at most 2. Use only real PostgreSQL views and columns (pg_stat_activity.application_name, not
+  application); if unsure of a query, leave sql out.
+- assumptions and missing_data: at most 2 items each, at most 100 characters each.
+This example shows only the style and the length; its facts are not about your package:
+` + styleExample
+
+const styleExample = `{"root_causes": [{"category": "missing_index", "title": "Запрос к id_3 читает всю таблицу: нет индекса по id_5",
+  "explanation": "Вызов замедлился с 0.6 до 30 мс при прежней частоте, чтений на вызов стало в 400 раз больше, в плане Seq Scan по id_3. Нагрузка не росла, блокировок нет.",
+  "confidence": 0.8, "evidence": ["Q1", "T1"]}],
+ "recommendations": [{"action": "Создать индекс по id_5 в таблице id_3", "priority": "now", "risk": "low",
+  "sql": "CREATE INDEX CONCURRENTLY ON id_3 (id_5);", "verify": "вызов снова около 0.6 мс", "evidence": ["Q1"], "requires_approval": true}],
+ "checks": [{"step": "Убедиться, что таблицу читают целиком", "sql": "SELECT relname, seq_scan, idx_scan FROM pg_stat_user_tables WHERE relname = 'id_3'", "expect": "растёт seq_scan, idx_scan стоит"}],
+ "assumptions": ["индекс не создали при последнем деплое"],
+ "missing_data": ["журнал миграций схемы"]}`
 
 const categoryGuide = `- lock_contention: sessions wait for row or table locks held by other sessions
 - long_transaction: an open or idle-in-transaction session holds row locks for too long (its waiters wait for Lock:transactionid or Lock:tuple)
@@ -71,21 +105,20 @@ Rules:
    into assumptions.
 3. Every root cause cites the evidence ids that support it. Give at most 3 causes, the most likely first, with
    confidence between 0 and 1.
-4. Explain the incidents together: name the root cause once and show which incidents are its symptoms.
+4. Explain the incidents together with one root cause; do not describe each incident separately.
 5. If the data cannot show a cause, use category "unknown" or a low confidence and list in missing_data what
    would settle it.
 6. checks are ordered diagnostic steps a developer runs next. SQL in checks must be read-only.
-7. recommendations are concrete fixes in priority order. Each has a verify step naming the metric (by evidence id)
-   and the level it must return to. Any SQL that changes state (pg_terminate_backend, ALTER, CREATE INDEX, VACUUM,
-   SET) has requires_approval true. Terminate or cancel only a root blocker, by its PID. Prefer the least
-   disruptive fix first.
-8. Write every text field in Russian. The whole answer must stay under 800 tokens: summary at most 2 sentences,
-   every explanation at most 2 sentences, at most 3 root causes, 4 checks, 4 recommendations, 3 assumptions and
-   3 missing_data items.
-9. Reply with exactly one JSON object and nothing else, in this shape:
+7. recommendations are concrete fixes in priority order, each with the effect that shows it worked. Any SQL that
+   changes state (pg_terminate_backend, ALTER, CREATE INDEX, VACUUM, SET) has requires_approval true. Terminate or
+   cancel only a root blocker, by its PID. Prefer the least disruptive fix first.
+8. Reply with exactly one JSON object and nothing else, in this shape:
 ` + answerShape + `
 category is one of:
-` + categoryGuide
+` + categoryGuide + `
+
+How to write:
+` + writingGuide
 }
 
 func conversation(p evidence.Package) []llm.Message {
