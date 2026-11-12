@@ -17,7 +17,7 @@ func TestSQLIncidentSummaryPreservesLookupFormatAndGrafanaWindow(t *testing.T) {
 
 	b := New("", "", "https://grafana.test/d/hunter?orgId=2")
 	text := b.IncidentSummary(i)
-	for _, want := range []string{"sql_execution_regression", "SQL 42", "20.00 ms/вызов", "baseline: 1.00", "Недостаточно данных, чтобы оценить восстановление", "Ссылка на окно в Grafana", "from=", "to=", "orgId=2"} {
+	for _, want := range []string{"Факты: замедление SQL", "SQL 42", "20.00 ms/вызов", "baseline: 1.00", "Недостаточно данных, чтобы оценить восстановление", "Ссылка на окно в Grafana", "from=", "to=", "orgId=2"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q in %s", want, text)
 		}

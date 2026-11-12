@@ -67,3 +67,29 @@ func TestSendPreservesLiteralText(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestFormatIncidentReadableFindings(t *testing.T) {
+	i := detector.Incident{
+		Findings: []detector.Finding{
+			detector.FindingQueryAgeRegression, detector.FindingLockWait,
+			detector.FindingLockContention, detector.FindingIdleInTransaction,
+			detector.FindingActiveSessionsSurge, detector.FindingTempFileGrowth,
+			detector.FindingDeadlock, detector.FindingSQLExecutionRegression,
+			"future_finding",
+		},
+		Trigger: detector.Trigger{Metric: "test", Observed: 4, Baseline: 1, Threshold: 3},
+		Peak:    5,
+	}
+	text := FormatIncident(i)
+	for _, want := range []string{
+		"Факты: долгие активные запросы, ожидание блокировок, найдены корневые блокировщики, простой с открытой транзакцией, всплеск активных сессий, рост записи временных файлов, deadlock, замедление SQL, future_finding",
+		"test: 4.00; baseline: 1.00; threshold: 3.00; peak: 5.00",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in %s", want, text)
+		}
+	}
+	if i.Findings[0] != detector.FindingQueryAgeRegression {
+		t.Fatal("presentation changed machine-readable findings")
+	}
+}

@@ -153,14 +153,14 @@ func FormatIncident(i detector.Incident) string {
 	var b strings.Builder
 	findings := make([]string, len(i.Findings))
 	for n, f := range i.Findings {
-		findings[n] = string(f)
+		findings[n] = findingName(string(f))
 	}
 	indicator := "🔴"
 	if i.Status == detector.Resolved {
 		indicator = "🟢"
 	}
 	fmt.Fprintf(&b, "%s Инцидент %s · %s\nНачало: %s\nФакты: %s\n", indicator, i.ID, i.Status, formatTime(i.StartedAt), strings.Join(findings, ", "))
-	fmt.Fprintf(&b, "%s: %.2f; baseline: %.2f; порог: %.2f; пик: %.2f\n", i.Trigger.Metric, i.Trigger.Observed, i.Trigger.Baseline, i.Trigger.Threshold, i.Peak)
+	fmt.Fprintf(&b, "%s: %.2f; baseline: %.2f; threshold: %.2f; peak: %.2f\n", i.Trigger.Metric, i.Trigger.Observed, i.Trigger.Baseline, i.Trigger.Threshold, i.Peak)
 	if i.Trigger.IntervalSeconds > 0 {
 		fmt.Fprintf(&b, "Интервал измерения: %.1f s\n", i.Trigger.IntervalSeconds)
 	}
