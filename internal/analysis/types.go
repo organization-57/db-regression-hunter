@@ -24,7 +24,7 @@ var (
 )
 
 type Analysis struct {
-	Summary         string           `json:"summary"`
+	Summary         string           `json:"summary,omitempty"`
 	RootCauses      []Cause          `json:"root_causes"`
 	Checks          []Check          `json:"checks"`
 	Recommendations []Recommendation `json:"recommendations"`

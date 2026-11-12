@@ -17,10 +17,7 @@ func Rules(p evidence.Package) Analysis {
 	for _, m := range p.Metrics {
 		r.metrics[m.Name] = m
 	}
-	a := r.explain()
-	a.Assumptions = append(a.Assumptions, "вывод сделан правилами hunter без LLM по тем же доказательствам; уверенность ниже, чем у проверенного ответа модели")
-	a.MissingData = append(a.MissingData, "объяснение модели: анализ Gonka не получен")
-	return a
+	return r.explain()
 }
 
 func (r rules) explain() Analysis {

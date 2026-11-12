@@ -80,7 +80,7 @@ func answer(mutate func(map[string]any)) string {
 	a := map[string]any{
 		"summary": "Сессия 4127 в состоянии idle in transaction держит строку, за ней ждут 7 сессий; замедление Q1 — симптом.",
 		"root_causes": []any{map[string]any{"category": "long_transaction", "title": "Незавершённая транзакция", "confidence": 0.9,
-			"explanation": "L1 блокирует 7 сессий, ожидают Lock до 7 сессий.", "evidence": []string{"L1", "M3", "I1"}}},
+			"explanation": "PID 4127 простаивает в открытой транзакции, за ним ждут 7 сессий.", "evidence": []string{"L1", "M3", "I1"}}},
 		"checks": []any{map[string]any{"step": "Проверить блокирующие PID", "sql": "SELECT pid, pg_blocking_pids(pid) FROM pg_stat_activity", "expect": "PID 4127"}},
 		"recommendations": []any{map[string]any{"action": "Завершить транзакцию PID 4127 после согласования", "priority": "now", "risk": "medium",
 			"sql": "SELECT pg_terminate_backend(4127)", "verify": "M3 возвращается к 0", "evidence": []string{"L1"}, "requires_approval": false}},
@@ -264,5 +264,39 @@ func TestFailoverHedgingWavesAndFailures(t *testing.T) {
 	}
 	if r := analyst(&fakeChat{}).Analyze(context.Background(), pkg()); r.Status != Fallback || r.Reason != "unavailable" || r.Error != "no model was called" {
 		t.Fatalf("no models: %+v", r)
+	}
+}
+
+func TestWritingLimitsCostARepairOnlyWhenTheCardBreaks(t *testing.T) {
+	ids := answer(func(a map[string]any) { cause(a)["explanation"] = "L1 блокирует 7 сессий (M3=6)." })
+	long := answer(func(a map[string]any) {
+		cause(a)["explanation"] = strings.Repeat("очень длинное объяснение ", 30)
+	})
+	for name, content := range map[string]string{"evidence ids in text": ids, "explanation too long": long} {
+		c := &fakeChat{steps: map[string][]step{"a": {{content: content}, {content: answer(nil)}}}}
+		r := analyst(c, "a").Analyze(context.Background(), pkg())
+		if outcomes(r) != "a:invalid,a:valid" {
+			t.Errorf("%s: %s %+v", name, outcomes(r), r.Attempts)
+		}
+	}
+	verbose := answer(func(a map[string]any) {
+		delete(a, "summary")
+		var recs []any
+		for n := 0; n < 5; n++ {
+			recs = append(recs, rec(a))
+		}
+		a["recommendations"] = recs
+		check := a["checks"].([]any)[0]
+		a["checks"] = []any{check, check, check}
+		a["assumptions"] = []string{"первое", "второе", "третье"}
+		a["missing_data"] = []string{"первое", "второе", "третье"}
+	})
+	c := &fakeChat{steps: map[string][]step{"a": {{content: verbose}}}}
+	r := analyst(c, "a").Analyze(context.Background(), pkg())
+	if r.Status != Done || len(c.requests) != 1 {
+		t.Fatalf("extra items and a missing summary must not cost a repair round: %s %+v", outcomes(r), r.Attempts)
+	}
+	if a := r.Analysis; len(a.Recommendations) != 3 || len(a.Checks) != 2 || len(a.Assumptions) != 2 || len(a.MissingData) != 2 {
+		t.Fatalf("lists not trimmed: %+v", a)
 	}
 }
