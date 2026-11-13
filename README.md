@@ -6,7 +6,7 @@
 
 Хакатонный проект на **Go**. Интерфейс — **Telegram + Grafana**, запуск — **Docker Compose**, объяснение причин — опциональная **LLM через Gonka / OpenBroker**.
 
-[Запуск](#быстрый-запуск) · [Демо](#демонстрация) · [Архитектура](#архитектура) · [LLM-контракт](docs/llm-contract.md)
+[Запуск](#быстрый-запуск) · [Демо](#демонстрация) · [Архитектура](#архитектура) · [LLM-контракт](docs/llm-contract.md) · [Презентация ](https://docs.google.com/presentation/d/1Hd4m1Q5soGgQVSmoXk2F8b4IVBJsv2MCJO6b342d15g/edit?slide=id.p9#slide=id.p9)
 
 ## Что умеет
 
